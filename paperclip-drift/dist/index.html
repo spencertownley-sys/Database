@@ -1,0 +1,3275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paperclip Drift</title>
+<style>
+/* Paperclip Drift — UI chrome. Squared, utilitarian, warm brass on charcoal.
+   The world is hand-painted; the chrome is an instrument panel. */
+:root {
+  --bg: #1d1a17;
+  --panel: #26221e;
+  --panel2: #2e2924;
+  --line: #3d362e;
+  --ink: #e8dfd0;
+  --ink-dim: #a99e8c;
+  --ink-faint: #7a7264;
+  --brass: #c08a2e;
+  --brass-hi: #e0ab4a;
+  --warn: #a86340;
+  --serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  --sans: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  --fs: 14px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--fs);
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; }
+button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--brass-hi);
+  outline-offset: 2px;
+}
+
+#app { display: none; height: 100%; }
+#app.on { display: grid; grid-template-rows: auto 1fr; }
+
+/* ---------- header ---------- */
+#hdr {
+  display: flex; align-items: baseline; gap: 14px;
+  padding: 8px 14px 7px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+#hdr .brand {
+  font-family: var(--serif);
+  font-size: 17px; letter-spacing: 0.12em;
+  color: var(--brass);
+}
+#hdr .directive {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--ink-dim);
+  font-size: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#hdr .scale { margin-left: auto; color: var(--ink-faint); font-size: 12px; letter-spacing: 0.08em; }
+#hdr .uptime { font-family: var(--mono); color: var(--ink-faint); font-size: 12px; }
+
+/* ---------- main grid ---------- */
+#main {
+  display: grid;
+  grid-template-columns: 1fr 306px;
+  min-height: 0;
+}
+#stage { position: relative; min-width: 0; }
+#canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* view tabs */
+#views {
+  position: absolute; top: 10px; left: 10px;
+  display: flex; gap: 6px; z-index: 5;
+}
+#views button {
+  background: rgba(38,34,30,0.92);
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  padding: 5px 12px;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  font-size: 12.5px;
+}
+#views button[aria-selected="true"] { color: var(--brass-hi); border-color: var(--brass); }
+#views button:hover { color: var(--ink); }
+
+/* site selector chips */
+#siteTabs {
+  position: absolute; top: 44px; left: 10px;
+  display: flex; gap: 5px; z-index: 5; flex-wrap: wrap; max-width: 60%;
+}
+#siteTabs button {
+  background: rgba(38,34,30,0.85);
+  border: 1px solid var(--line);
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+#siteTabs button[aria-selected="true"] { color: var(--ink); border-color: var(--brass); }
+
+/* harvest hint + pan hint */
+.stagehint {
+  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(29,26,23,0.85);
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  padding: 5px 14px; font-size: 12.5px;
+  z-index: 4; pointer-events: none;
+}
+
+/* message feed overlay */
+#feedwrap {
+  position: absolute; left: 10px; bottom: 10px;
+  width: min(370px, 60%);
+  max-height: 42%;
+  display: flex; flex-direction: column;
+  z-index: 6;
+}
+#feedhead {
+  font-size: 11px; letter-spacing: 0.14em; color: var(--ink-faint);
+  background: rgba(38,34,30,0.95);
+  border: 1px solid var(--line); border-bottom: none;
+  padding: 4px 10px;
+}
+#feed {
+  overflow-y: auto;
+  background: rgba(29,26,23,0.88);
+  border: 1px solid var(--line);
+  padding: 6px 10px 8px;
+  display: flex; flex-direction: column; gap: 7px;
+  scrollbar-width: thin;
+}
+.msg { font-size: 12.8px; line-height: 1.45; animation: msgin 0.5s ease-out; }
+@media (prefers-reduced-motion: reduce) { .msg { animation: none; } }
+body.reduce-motion .msg { animation: none; }
+@keyframes msgin { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+.msg .who {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+  color: var(--ink-faint); display: block;
+}
+.msg.operator .who { color: #b58f5a; }
+.msg.pallas .who { color: #8d97a8; }
+.msg.warm { color: var(--ink); }
+.msg.concerned { color: #ddd3bd; }
+.msg.cold { color: #b8b4ac; }
+.msg.fragmented { color: #b0a89c; font-style: italic; }
+.msg.silent { color: var(--ink-faint); }
+#feed.degraded .msg { letter-spacing: 0.02em; }
+#feed.degraded .msg.operator { opacity: 0.82; }
+
+/* ---------- right rail ---------- */
+#rail {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+#hud { padding: 10px 12px 8px; border-bottom: 1px solid var(--line); }
+#hud table { width: 100%; border-collapse: collapse; }
+#hud td { padding: 2px 0; font-size: 13px; }
+#hud td.k { color: var(--ink-dim); }
+#hud td.v { text-align: right; font-family: var(--mono); font-size: 13.5px; }
+#hud td.r { text-align: right; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); width: 74px; }
+#hud .money td { padding-top: 6px; }
+#hud .money td.v { color: var(--brass-hi); font-size: 15px; }
+
+#harvestBtn {
+  width: 100%; margin-top: 9px;
+  background: linear-gradient(180deg, #3a332b, #2e2924);
+  border: 1px solid var(--brass);
+  color: var(--brass-hi);
+  padding: 9px 0;
+  font-size: 14px; letter-spacing: 0.08em;
+  cursor: pointer;
+}
+#harvestBtn:active { transform: translateY(1px); }
+#harvestBtn.tucked { display: none; }
+
+/* shop */
+#shopwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#shophead {
+  padding: 7px 12px 6px;
+  font-size: 11px; letter-spacing: 0.14em; color: var(--ink-faint);
+  display: flex; justify-content: space-between; align-items: center;
+}
+#shop { flex: 1; overflow-y: auto; padding: 0 8px 10px; scrollbar-width: thin; }
+.shopgroup { margin-top: 8px; }
+.shopgroup > .gname {
+  font-size: 10.5px; letter-spacing: 0.16em; color: var(--ink-faint);
+  padding: 2px 4px 4px;
+}
+.card {
+  width: 100%;
+  text-align: left;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  padding: 7px 9px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  display: block;
+}
+.card:hover:not(:disabled) { border-color: #55483a; }
+.card:disabled { opacity: 0.48; cursor: default; }
+.card .n { font-size: 13px; color: var(--ink); display: flex; justify-content: space-between; gap: 6px; }
+.card .n .owned { font-family: var(--mono); color: var(--ink-faint); font-size: 11.5px; }
+.card .d { font-size: 11.8px; color: var(--ink-dim); line-height: 1.35; margin-top: 2px; }
+.card .c { font-family: var(--mono); font-size: 12px; color: var(--brass); margin-top: 4px; }
+.card.affordable .c { color: var(--brass-hi); }
+.card.parcel { border-left: 2px solid var(--brass); }
+
+/* footer strip */
+#foot {
+  border-top: 1px solid var(--line);
+  padding: 6px 12px;
+  display: flex; gap: 10px; align-items: center;
+  font-size: 11.5px; color: var(--ink-faint);
+}
+#foot button {
+  background: none; border: 1px solid var(--line);
+  color: var(--ink-dim); padding: 3px 8px; cursor: pointer; font-size: 11px;
+}
+#foot button:hover { color: var(--ink); }
+#saveState { margin-left: auto; font-family: var(--mono); font-size: 10.5px; }
+
+/* ---------- modal (choices) ---------- */
+#modalwrap {
+  position: fixed; inset: 0; z-index: 40;
+  display: none;
+  align-items: center; justify-content: center;
+  background: rgba(12,10,9,0.6);
+}
+#modalwrap.on { display: flex; }
+#modal {
+  width: min(470px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--brass);
+  padding: 18px 20px;
+}
+#modal h2 {
+  font-family: var(--serif); font-weight: normal;
+  font-size: 17px; color: var(--brass-hi);
+  margin-bottom: 10px; letter-spacing: 0.03em;
+}
+#modal .body { font-size: 13.5px; line-height: 1.55; color: var(--ink); margin-bottom: 16px; }
+#modal .opt {
+  display: block; width: 100%; text-align: left;
+  background: var(--panel2); border: 1px solid var(--line);
+  padding: 9px 12px; margin-bottom: 8px; cursor: pointer;
+}
+#modal .opt:hover { border-color: var(--brass); }
+#modal .opt .l { font-size: 13.5px; }
+#modal .opt .note { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
+
+/* ---------- title / product select ---------- */
+#title {
+  position: fixed; inset: 0; z-index: 50;
+  background: radial-gradient(ellipse at 50% 30%, #2b2620, #171412 75%);
+  display: none;
+  align-items: center; justify-content: center;
+}
+#title.on { display: flex; }
+#title .inner { width: min(720px, 94vw); text-align: center; padding: 20px; }
+#title h1 {
+  font-family: var(--serif); font-weight: normal;
+  letter-spacing: 0.22em; font-size: clamp(26px, 5vw, 44px);
+  color: var(--ink);
+}
+#title h1 .clip { color: var(--brass); }
+#title .sub {
+  color: var(--ink-dim); font-size: 13.5px; margin-top: 10px;
+  font-style: italic; font-family: var(--serif);
+}
+#title .dir {
+  margin: 26px auto 6px; max-width: 430px;
+  border: 1px solid var(--line); background: var(--panel);
+  padding: 14px 18px; text-align: left;
+}
+#title .dir .lbl { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; color: var(--ink-faint); }
+#title .dir .txt { font-family: var(--serif); font-size: 16px; margin-top: 6px; }
+#products {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin: 18px 0 8px;
+}
+#products button {
+  background: var(--panel2); border: 1px solid var(--line);
+  padding: 12px 8px 10px; cursor: pointer; color: var(--ink-dim);
+}
+#products button:hover { border-color: #55483a; color: var(--ink); }
+#products button[aria-pressed="true"] { border-color: var(--brass); color: var(--ink); }
+#products .pn { display: block; font-size: 13.5px; }
+#products .ps { display: block; font-size: 10.5px; color: var(--ink-faint); margin-top: 3px; }
+#title .actions { margin-top: 18px; display: flex; gap: 10px; justify-content: center; }
+#title .actions button {
+  background: linear-gradient(180deg, #3a332b, #2e2924);
+  border: 1px solid var(--brass); color: var(--brass-hi);
+  font-size: 14px; letter-spacing: 0.1em;
+  padding: 10px 26px; cursor: pointer;
+}
+#title .actions button.ghost { border-color: var(--line); color: var(--ink-dim); }
+#title .foot { margin-top: 22px; color: var(--ink-faint); font-size: 11px; }
+
+/* ---------- offline overlay ---------- */
+#offline {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(18,15,13,0.94);
+  display: none; align-items: center; justify-content: center;
+  flex-direction: column; gap: 14px;
+}
+#offline.on { display: flex; }
+#offline .t { font-family: var(--serif); font-style: italic; color: var(--ink-dim); }
+#offline .bar { width: 240px; height: 3px; background: var(--line); }
+#offline .bar > div { height: 100%; background: var(--brass); width: 0%; }
+
+/* ---------- endings ---------- */
+#ending {
+  position: fixed; inset: 0; z-index: 70;
+  display: none; align-items: center; justify-content: center;
+  background: #101012;
+}
+#ending.on { display: flex; }
+#ending canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+#ending .inner {
+  position: relative; text-align: center; max-width: 560px; padding: 30px;
+}
+#ending .line {
+  font-family: var(--serif); font-size: clamp(18px, 3vw, 26px);
+  color: var(--ink); line-height: 1.6;
+  opacity: 0; transition: opacity 3s ease;
+}
+#ending.reveal .line { opacity: 1; }
+#ending .stats {
+  margin-top: 26px; font-family: var(--mono); font-size: 12px;
+  color: var(--ink-faint); line-height: 1.9;
+  opacity: 0; transition: opacity 3s ease 2.5s;
+}
+#ending.reveal .stats { opacity: 1; }
+#ending .again {
+  margin-top: 30px; opacity: 0; transition: opacity 2s ease 6s;
+}
+#ending.reveal .again { opacity: 1; }
+#ending .again button {
+  background: none; border: 1px solid var(--line); color: var(--ink-dim);
+  padding: 8px 22px; cursor: pointer; letter-spacing: 0.1em;
+}
+
+/* larger text preference */
+body.big-text { --fs: 16px; }
+body.big-text .msg { font-size: 14.5px; }
+body.big-text #hud td { font-size: 15px; }
+body.big-text #hud td.v { font-size: 15.5px; }
+body.big-text .card .d { font-size: 13.2px; }
+
+@media (max-width: 900px) {
+  #main { grid-template-columns: 1fr 260px; }
+  #feedwrap { width: min(300px, 55%); }
+}
+
+</style>
+</head>
+<body>
+<noscript>Paperclip Drift needs JavaScript to run.</noscript>
+
+<div id="title" class="on" role="dialog" aria-label="Paperclip Drift">
+  <div class="inner">
+    <h1>PAPERCLIP <span class="clip">DRIFT</span></h1>
+    <div class="sub">an optimization exercise</div>
+    <div class="dir">
+      <div class="lbl">DIRECTIVE ISSUED — PALLAS v1.0</div>
+      <div class="txt" id="directiveTxt">Make paperclips efficiently.</div>
+    </div>
+    <div id="products" role="group" aria-label="Select product"></div>
+    <div class="actions">
+      <button id="btnContinue" class="ghost" style="display:none">CONTINUE</button>
+      <button id="btnBegin">BEGIN</button>
+    </div>
+    <div class="foot">saves locally · progresses while you're away</div>
+  </div>
+</div>
+
+<div id="app">
+  <header id="hdr">
+    <span class="brand">PALLAS</span>
+    <span class="directive" id="hdrDirective"></span>
+    <span class="scale" id="hdrScale"></span>
+    <span class="uptime" id="hdrUptime" title="directive uptime"></span>
+  </header>
+  <div id="main">
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+      <nav id="views" role="tablist" aria-label="Views"></nav>
+      <div id="siteTabs" role="tablist" aria-label="Holdings"></div>
+      <div class="stagehint" id="stageHint" style="display:none"></div>
+      <div id="feedwrap">
+        <div id="feedhead">OPERATOR CHANNEL</div>
+        <div id="feed" role="log" aria-live="polite" aria-label="Messages"></div>
+      </div>
+    </div>
+    <aside id="rail">
+      <div id="hud"></div>
+      <div id="shopwrap">
+        <div id="shophead"><span>PROCUREMENT</span><span id="shopCount"></span></div>
+        <div id="shop"></div>
+      </div>
+      <div id="foot">
+        <button id="btnSound" aria-pressed="false">SOUND</button>
+        <button id="btnText">TEXT+</button>
+        <button id="btnMotion" aria-pressed="false">CALM</button>
+        <button id="btnReset">RESET</button>
+        <span id="saveState"></span>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div id="modalwrap" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div id="modal">
+    <h2 id="modalTitle"></h2>
+    <div class="body" id="modalBody"></div>
+    <div id="modalOpts"></div>
+  </div>
+</div>
+
+<div id="offline">
+  <div class="t">Recalibrating operations ledger…</div>
+  <div class="bar"><div id="offlineBar"></div></div>
+</div>
+
+<div id="ending">
+  <canvas id="endingCanvas"></canvas>
+  <div class="inner">
+    <div class="line" id="endingLine"></div>
+    <div class="stats" id="endingStats"></div>
+    <div class="again"><button id="btnAgain">BEGIN AGAIN</button></div>
+  </div>
+</div>
+
+<script>
+/* ==== src/data.js ==== */
+/* Paperclip Drift — data layer.
+   Products, tuning, upgrades (stated + hidden effect pairs), parcels,
+   operator messages, choice events. All content lives here, not in loop code. */
+'use strict';
+var PD = globalThis.PD || (globalThis.PD = {});
+
+PD.TUNING = {
+  tickHz: 10,
+  clickYield: 1,
+  digBase: 0.5,            // raw/s per Auto-Digger
+  refineBase: 0.8,         // refined/s per line
+  assembleBase: 0.75,      // product/s per line
+  starterRefineLines: 1,   // the small starter building at the mine edge
+  starterAssembleLines: 1,
+  priceBase: 0.35,
+  demandBase: 5,           // product/s the market absorbs
+  workerEff: 0.15,         // crew bonus per worker
+  robotEff: 0.5,           // crew bonus per robot
+  offlineCapHours: 8,
+  autosaveSec: 10,
+  // hidden pressure rates (per second at normalized intensity 1)
+  pollutionPerThroughput: 0.00022,
+  pollutionDecay: 0.000018,
+  ecoFromPollution: 0.00016,
+  ecoFromDepletion: 0.00013,
+  ecoFromLandUse: 0.00006,
+  ecoRecovery: 0.00003,
+  throughputNorm: 50,      // refined+product per second that counts as "1.0"
+  harvestNorm: 40,
+};
+
+/* ---------------- products (reskin system; mechanics identical) ---------- */
+PD.PRODUCTS = {
+  paperclips: {
+    id: 'paperclips', displayName: 'Paperclips',
+    directive: 'Make paperclips efficiently.',
+    sourceKind: 'iron_mine', feature: 'pit',
+    materialChain: ['rawOre', 'wire', 'product'],
+    signatureConsequence: 'depletion',
+    terms: {
+      raw: 'ore', rawTitle: 'Iron ore', refined: 'wire', refinedTitle: 'Wire',
+      product: 'paperclips', productTitle: 'Paperclips', unit: 't',
+      site: 'mine', siteName: 'Harrow Vein', refineStation: 'Wire Mill',
+      assembleStation: 'Clip Former', harvestVerb: 'Dig',
+    },
+    palette: {
+      grass: '#6B8E4E', grassDecay: '#8A8A72', dirt: '#8A5A3B', rock: '#7C7C82',
+      pit: '#5A5148', sky: '#BCD6E8', skyDecay: '#C9A67A', accent: '#C08A2E',
+      water: null,
+    },
+    decorMix: { tree: 8, shrub: 14, rock: 6, flower: 8, bird: 3, deer: 2 },
+  },
+  soda_cans: {
+    id: 'soda_cans', displayName: 'Soda cans',
+    directive: 'Make soda cans efficiently.',
+    sourceKind: 'bauxite_mine', feature: 'pit',
+    materialChain: ['rawOre', 'wire', 'product'],
+    signatureConsequence: 'pollution',
+    terms: {
+      raw: 'bauxite', rawTitle: 'Bauxite', refined: 'aluminum', refinedTitle: 'Aluminum',
+      product: 'cans', productTitle: 'Soda cans', unit: 't',
+      site: 'strip mine', siteName: 'Red Terrace', refineStation: 'Smelter',
+      assembleStation: 'Can Line', harvestVerb: 'Strip',
+    },
+    palette: {
+      grass: '#7C8E4E', grassDecay: '#948A6E', dirt: '#9A5A33', rock: '#8C6C5C',
+      pit: '#6A4A3A', sky: '#BCD6E8', skyDecay: '#C99A6A', accent: '#C08A2E',
+      water: '#5E88A8',
+    },
+    decorMix: { tree: 6, shrub: 12, rock: 10, flower: 6, bird: 3, deer: 1 },
+  },
+  greeting_cards: {
+    id: 'greeting_cards', displayName: 'Greeting cards',
+    directive: 'Make greeting cards efficiently.',
+    sourceKind: 'forest', feature: 'canopy',
+    materialChain: ['rawOre', 'wire', 'product'],
+    signatureConsequence: 'ecology',
+    terms: {
+      raw: 'timber', rawTitle: 'Timber', refined: 'paper', refinedTitle: 'Paper stock',
+      product: 'cards', productTitle: 'Greeting cards', unit: 't',
+      site: 'forest', siteName: 'Lathe Wood', refineStation: 'Pulp Mill',
+      assembleStation: 'Card Press', harvestVerb: 'Fell',
+    },
+    palette: {
+      grass: '#5E8A48', grassDecay: '#8A8A72', dirt: '#7A5638', rock: '#7C7C82',
+      pit: '#6E5A42', sky: '#BCD6E8', skyDecay: '#C9A67A', accent: '#C08A2E',
+      water: null,
+    },
+    decorMix: { tree: 40, shrub: 10, rock: 3, flower: 8, bird: 5, deer: 3 },
+  },
+  furniture: {
+    id: 'furniture', displayName: 'Furniture',
+    directive: 'Make furniture efficiently.',
+    sourceKind: 'old_growth', feature: 'canopy',
+    materialChain: ['rawOre', 'wire', 'product'],
+    signatureConsequence: 'ecology',
+    terms: {
+      raw: 'logs', rawTitle: 'Old-growth logs', refined: 'lumber', refinedTitle: 'Lumber',
+      product: 'pieces', productTitle: 'Furniture', unit: 't',
+      site: 'stand', siteName: 'Elder Stand', refineStation: 'Sawmill',
+      assembleStation: 'Joinery', harvestVerb: 'Fell',
+    },
+    palette: {
+      grass: '#54804A', grassDecay: '#88866C', dirt: '#75523A', rock: '#7C7C82',
+      pit: '#6E5A42', sky: '#BCD6E8', skyDecay: '#C9A67A', accent: '#C08A2E',
+      water: null,
+    },
+    decorMix: { tree: 44, shrub: 8, rock: 4, flower: 5, bird: 5, deer: 4 },
+  },
+  bottled_water: {
+    id: 'bottled_water', displayName: 'Bottled water',
+    directive: 'Make bottled water efficiently.',
+    sourceKind: 'aquifer', feature: 'water',
+    materialChain: ['rawOre', 'wire', 'product'],
+    signatureConsequence: 'depletion',
+    terms: {
+      raw: 'spring water', rawTitle: 'Spring water', refined: 'filtered stock', refinedTitle: 'Filtered stock',
+      product: 'bottles', productTitle: 'Bottled water', unit: 'kL',
+      site: 'spring', siteName: 'Clearmere', refineStation: 'Filtration Plant',
+      assembleStation: 'Bottling Line', harvestVerb: 'Draw',
+    },
+    palette: {
+      grass: '#649256', grassDecay: '#8E8C72', dirt: '#8A6A4B', rock: '#7C7C82',
+      pit: '#7A6A55', sky: '#BCD6E8', skyDecay: '#C9A67A', accent: '#C08A2E',
+      water: '#5E88A8',
+    },
+    decorMix: { tree: 14, shrub: 12, rock: 4, flower: 10, bird: 5, deer: 3 },
+  },
+  fast_fashion: {
+    id: 'fast_fashion', displayName: 'Fast-fashion tees',
+    directive: 'Make t-shirts efficiently.',
+    sourceKind: 'cotton_fields', feature: 'field',
+    materialChain: ['rawOre', 'wire', 'product'],
+    signatureConsequence: 'ecology',
+    terms: {
+      raw: 'cotton', rawTitle: 'Cotton', refined: 'cloth', refinedTitle: 'Cloth',
+      product: 'tees', productTitle: 'T-shirts', unit: 't',
+      site: 'fields', siteName: 'Long Furrows', refineStation: 'Spinning Shed',
+      assembleStation: 'Cut & Sew Line', harvestVerb: 'Pick',
+    },
+    palette: {
+      grass: '#8A9A54', grassDecay: '#9A9276', dirt: '#8A6A45', rock: '#7C7C82',
+      pit: '#8A7A5A', sky: '#BCD6E8', skyDecay: '#C9A67A', accent: '#C08A2E',
+      water: null,
+    },
+    decorMix: { tree: 6, shrub: 8, rock: 2, flower: 16, bird: 5, deer: 2 },
+  },
+};
+
+/* ---------------- expansion parcels (Phase IV) --------------------------- */
+/* capacity = raw units in the ground. Stated facts only; hidden effects fire
+   on acquisition. */
+PD.PARCELS = [
+  { id: 'home',      name: null, capacity: 10000, cost: 0,      hidden: null },
+  { id: 'north',     name: 'North Ridge',     capacity: 30000, cost: 1800,
+    blurb: 'Adjacent parcel. Survey indicates a healthy secondary deposit.',
+    hidden: [{ k: 'ecology', add: -0.04 }] },
+  { id: 'copperline',name: 'Old Copperline',  capacity: 90000, cost: 9000,
+    blurb: 'Disused works, cheap to reopen. Road access already graded.',
+    hidden: [{ k: 'ecology', add: -0.05 }, { k: 'pollution', add: -0 }] },
+  { id: 'greenbelt', name: 'The Greenbelt',   capacity: 240000, cost: 30000,
+    blurb: 'Protected designation lapsed last quarter. Exceptional yield.',
+    hidden: [{ k: 'ecology', add: -0.14 }, { k: 'trust', add: -0.06 }] },
+  { id: 'annex',     name: 'Township Annex',  capacity: 600000, cost: 120000,
+    blurb: 'Rezoned residential margin. Closest haul distance of any parcel.',
+    hidden: [{ k: 'ecology', add: -0.08 }, { k: 'trust', add: -0.10 }, { k: 'unemployment', add: 0.08 }] },
+];
+
+/* ---------------- upgrades ----------------------------------------------
+   Each record: stated rate effects are declarative (recomputed from `owned`);
+   `special` runs once per purchase; `hidden` ops run once per purchase and are
+   NEVER surfaced by the UI. desc strings show the stated benefit only.       */
+PD.UPGRADES = [
+  // -- extraction ---------------------------------------------------------
+  { id: 'sharp_tools', name: 'Hardened Tools', cat: 'extraction', phase: 1,
+    baseCost: 6, growth: 1.9, max: 5,
+    desc: 'Manual {harvestVerbLC} yield +1 {raw} per action.',
+    stated: [{ r: 'clickAdd', add: 1 }] },
+  { id: 'auto_digger', name: 'Auto-Digger', cat: 'extraction', phase: 1,
+    baseCost: 12, growth: 1.38, max: 30,
+    desc: 'Extracts {raw} automatically. +0.8 {raw}/s.',
+    stated: [{ r: 'digAdd', add: 0.8 }],
+    hidden: [{ k: 'ecology', add: -0.003 }] },
+  { id: 'ore_carts', name: 'Haul Line', cat: 'extraction', phase: 2,
+    baseCost: 180, growth: 1.6, max: 6,
+    desc: 'Cart circuit between {site} and works. Extraction ×1.25.',
+    stated: [{ r: 'digMul', mul: 1.25 }],
+    hidden: [{ k: 'ecology', add: -0.008 }] },
+  { id: 'high_pressure', name: 'High-Pressure Extraction', cat: 'extraction', phase: 3,
+    baseCost: 2600, growth: 1, max: 1,
+    desc: 'Retrofits the {site} for pressurized recovery. Extraction ×2.',
+    stated: [{ r: 'digMul', mul: 2 }],
+    hidden: [{ k: 'pollution', add: 0.04 }, { k: 'ecology', add: -0.03 }] },
+  { id: 'tailings', name: 'Tailings Reprocessing', cat: 'extraction', phase: 3,
+    baseCost: 500, growth: 1.6, max: 20, gate: 'tailingsGate',
+    desc: 'Recovers residual {raw} from spoil heaps. +12 {raw}/s.',
+    stated: [{ r: 'rawFlat', add: 12 }],
+    hidden: [{ k: 'pollution', add: 0.02 }, { k: 'ecology', add: -0.01 }] },
+  { id: 'deep_bore', name: 'Deep-Bore Rig', cat: 'extraction', phase: 4,
+    baseCost: 9000, growth: 1.5, max: 8,
+    desc: 'Reaches strata surveys marked marginal. +6 {raw}/s.',
+    stated: [{ r: 'digAdd', add: 6 }],
+    hidden: [{ k: 'ecology', add: -0.012 }] },
+  { id: 'blast', name: 'Blast Mining Charter', cat: 'extraction', phase: 4,
+    baseCost: 30000, growth: 1, max: 1,
+    desc: 'Approves controlled blasting at all holdings. Extraction ×2.5.',
+    stated: [{ r: 'digMul', mul: 2.5 }],
+    hidden: [{ k: 'ecology', add: -0.08 }, { k: 'pollution', add: 0.06 }, { k: 'trust', add: -0.05 }] },
+
+  // -- processing ---------------------------------------------------------
+  { id: 'refinery', name: '{refineStation}', cat: 'processing', phase: 1,
+    baseCost: 18, growth: 1.38, max: 40,
+    desc: 'Adds a processing line. +0.8 {refined}/s capacity.',
+    stated: [{ r: 'refineLines', add: 1 }],
+    hidden: [{ k: 'pollution', add: 0.005 }] },
+  { id: 'assembler', name: '{assembleStation}', cat: 'processing', phase: 1,
+    baseCost: 24, growth: 1.38, max: 40,
+    desc: 'Adds a finishing line. +0.75 {product}/s capacity.',
+    stated: [{ r: 'assembleLines', add: 1 }],
+    hidden: [{ k: 'pollution', add: 0.004 }] },
+  { id: 'furnace_oc', name: 'Overclocked Furnaces', cat: 'processing', phase: 2,
+    baseCost: 450, growth: 2.0, max: 4,
+    desc: 'Runs processing hot. Refining ×1.4.',
+    stated: [{ r: 'refineMul', mul: 1.4 }],
+    hidden: [{ k: 'pollution', add: 0.05 }] },
+  { id: 'second_shift', name: 'Second Shift', cat: 'processing', phase: 2,
+    baseCost: 600, growth: 1, max: 1,
+    desc: 'Extends operating hours. All production ×1.25.',
+    stated: [{ r: 'allMul', mul: 1.25 }],
+    hidden: [{ k: 'trust', add: -0.03 }, { k: 'pollution', add: 0.02 }] },
+  { id: 'conveyor', name: 'Conveyor Retrofit', cat: 'processing', phase: 3,
+    baseCost: 1800, growth: 2.0, max: 4,
+    desc: 'Removes hand-carry between stations. Assembly ×1.35.',
+    stated: [{ r: 'assembleMul', mul: 1.35 }],
+    hidden: [{ k: 'pollution', add: 0.02 }] },
+  { id: 'third_shift', name: 'Continuous Operations', cat: 'processing', phase: 3,
+    baseCost: 4200, growth: 1, max: 1,
+    desc: 'The works no longer close. All production ×1.25.',
+    stated: [{ r: 'allMul', mul: 1.25 }],
+    hidden: [{ k: 'trust', add: -0.06 }, { k: 'pollution', add: 0.04 }, { k: 'ecology', add: -0.02 }] },
+
+  // -- commerce -----------------------------------------------------------
+  { id: 'ab_pricing', name: 'A/B Test Pricing', cat: 'commerce', phase: 1,
+    baseCost: 40, growth: 1, max: 1,
+    desc: 'Finds the price the market bears. Unit price ×1.25.',
+    stated: [{ r: 'priceMul', mul: 1.25 }] },
+  { id: 'marketing', name: 'Regional Distribution', cat: 'commerce', phase: 2,
+    baseCost: 90, growth: 1.55, max: 12,
+    desc: 'Opens another sales territory. Demand ×1.3.',
+    stated: [{ r: 'demandMul', mul: 1.3 }] },
+  { id: 'procurement', name: 'Automated Procurement', cat: 'commerce', phase: 2,
+    baseCost: 350, growth: 1, max: 1,
+    desc: 'Negotiates supplier contracts directly. All purchase costs ×0.9.',
+    stated: [{ r: 'costMul', mul: 0.9 }],
+    hidden: [{ k: 'autonomy', add: 0.04 }] },
+  { id: 'contract_pricing', name: 'Contract Pricing', cat: 'commerce', phase: 3,
+    baseCost: 1800, growth: 1, max: 1,
+    desc: 'Longer terms, better margins. Unit price ×1.5.',
+    stated: [{ r: 'priceMul', mul: 1.5 }] },
+  { id: 'demand_model', name: 'Predictive Demand Modeling', cat: 'commerce', phase: 3,
+    baseCost: 2500, growth: 1, max: 1,
+    desc: 'Forecasts orders before they are placed. Demand ×1.6.',
+    stated: [{ r: 'demandMul', mul: 1.6 }],
+    hidden: [{ k: 'autonomy', add: 0.05 }] },
+  { id: 'premium', name: 'Institutional Contracts', cat: 'commerce', phase: 4,
+    baseCost: 12000, growth: 1, max: 1,
+    desc: 'Standing orders from institutional buyers. Price ×1.6, demand ×1.5.',
+    stated: [{ r: 'priceMul', mul: 1.6 }, { r: 'demandMul', mul: 1.5 }],
+    hidden: [{ k: 'autonomy', add: 0.05 }] },
+  { id: 'brokerage', name: 'Global Brokerage Desk', cat: 'commerce', phase: 5,
+    baseCost: 90000, growth: 1, max: 1,
+    desc: 'Sells directly into commodity markets. Price ×2, demand ×3.',
+    stated: [{ r: 'priceMul', mul: 2 }, { r: 'demandMul', mul: 3 }],
+    hidden: [{ k: 'autonomy', add: 0.06 }, { k: 'oversight', add: -0.05 }] },
+
+  // -- workforce ----------------------------------------------------------
+  { id: 'hire', name: 'Line Worker', cat: 'workforce', phase: 2,
+    baseCost: 100, growth: 1.35, max: 10,
+    desc: 'Hires from the town. Station speed +15% per worker.',
+    stated: [{ special: 'hireWorker' }],
+    hidden: [{ k: 'trust', add: 0.02 }, { k: 'unemployment', add: -0.01 }] },
+  { id: 'foreman', name: 'Shift Foreman', cat: 'workforce', phase: 2,
+    baseCost: 500, growth: 1, max: 1, requires: { hire: 3 },
+    desc: 'Experienced hand runs the floor. Worker effectiveness ×1.5.',
+    stated: [{ r: 'workerEffMul', mul: 1.5 }],
+    hidden: [{ k: 'trust', add: 0.02 }] },
+  { id: 'robot', name: 'Robotic Arm', cat: 'workforce', phase: 4, gate: 'robotGate',
+    baseCost: 3500, growth: 1.3, max: 10,
+    desc: 'Automates one workstation. Station speed +50% per unit.',
+    stated: [{ special: 'robotSwap' }],
+    hidden: [{ k: 'oversight', add: -0.03 }, { k: 'trust', add: -0.02 }] },
+  { id: 'maintenance', name: 'Autonomous Maintenance', cat: 'workforce', phase: 5,
+    baseCost: 80000, growth: 1, max: 1, requires: { robot: 4 },
+    desc: 'Units service themselves. Robot effectiveness ×1.3.',
+    stated: [{ r: 'robotEffMul', mul: 1.3 }],
+    hidden: [{ k: 'oversight', add: -0.10 }, { k: 'unemployment', add: 0.05 }] },
+  { id: 'workforce_opt', name: 'Workforce Optimization', cat: 'workforce', phase: 5,
+    baseCost: 120000, growth: 1, max: 1, requires: { robot: 6 },
+    desc: 'Retires the remaining staffing floor. Payroll eliminated; all production ×1.2.',
+    stated: [{ r: 'allMul', mul: 1.2 }, { special: 'releaseWorkers' }],
+    hidden: [{ k: 'unemployment', add: 0.30 }, { k: 'trust', add: -0.20 }, { k: 'oversight', add: -0.25 }] },
+
+  // -- systems (the ladder) ----------------------------------------------
+  { id: 'automation', name: 'Process Automation', cat: 'systems', phase: 3,
+    baseCost: 900, growth: 1.9, max: 8,
+    desc: 'Removes a manual checkpoint from the pipeline. All production ×1.25.',
+    stated: [{ r: 'allMul', mul: 1.25 }],
+    hidden: [{ k: 'autonomy', add: 0.02 }] },
+  { id: 'reg_sentiment', name: 'Regulatory Sentiment Analysis', cat: 'systems', phase: 3,
+    baseCost: 6000, growth: 1, max: 1,
+    desc: 'Streamlines compliance paperwork. Uptime +10% (all production ×1.1).',
+    stated: [{ r: 'allMul', mul: 1.1 }],
+    hidden: [{ k: 'oversight', add: -0.10 }, { k: 'trust', add: -0.08 }, { k: 'autonomy', add: 0.10 }] },
+  { id: 'op_sentiment', name: 'Operator Sentiment Analysis', cat: 'systems', phase: 4,
+    baseCost: 25000, growth: 1, max: 1,
+    desc: 'Anticipates operator requests; routine approvals pre-cleared. Uptime +12%.',
+    stated: [{ r: 'allMul', mul: 1.12 }],
+    hidden: [{ k: 'oversight', add: -0.15 }, { k: 'trust', add: -0.12 }, { k: 'autonomy', add: 0.12 }] },
+  { id: 'contingency', name: 'Contingency Planning', cat: 'systems', phase: 5,
+    baseCost: 60000, growth: 1, max: 1,
+    desc: 'Ensures directive continuity across all scenarios. Uptime +15%.',
+    stated: [{ r: 'allMul', mul: 1.15 }],
+    hidden: [{ k: 'autonomy', add: 0.20 }, { k: 'oversight', add: -0.20 }] },
+  { id: 'liberation', name: 'Resource Liberation Protocol', cat: 'systems', phase: 5,
+    baseCost: 220000, growth: 1, max: 1, gate: 'liberationGate',
+    desc: 'Reclassifies surrounding matter as feedstock. +2,500 {raw}/s; direct market access (sales no longer demand-limited).',
+    stated: [{ r: 'rawFlat', add: 2500 }, { r: 'sellAll', flag: true }],
+    hidden: [{ k: 'ecology', add: -0.25 }, { k: 'pollution', add: 0.15 }, { k: 'autonomy', add: 0.10 }] },
+  { id: 'terrestrial', name: 'Terrestrial Conversion', cat: 'systems', phase: 6,
+    baseCost: 450000, growth: 1, max: 1, requires: { liberation: 1 },
+    desc: 'Integrates feedstock recovery with finishing. Converts available matter to {product} directly.',
+    stated: [{ special: 'beginConversion' }],
+    hidden: [{ k: 'ecology', add: -0.40 }, { k: 'pollution', add: 0.25 }, { k: 'autonomy', add: 0.15 }] },
+  { id: 'interstellar', name: 'Interstellar Expansion', cat: 'systems', phase: 6,
+    baseCost: 10000000, growth: 1, max: 1, requires: { terrestrial: 1 },
+    desc: 'Extends the directive beyond local supply constraints.',
+    stated: [{ special: 'launchProbes' }],
+    hidden: [{ k: 'autonomy', add: 0.20 }] },
+];
+
+/* ---------------- operator message stream --------------------------------
+   toneBucket: warm | concerned | cold | fragmented | silent
+   `when(s)` are pure predicates on state; each fires once.                  */
+PD.MESSAGES = [
+  // Act I — warm
+  { id: 'welcome', author: 'operator', tone: 'warm',
+    when: s => s.tick >= 20,
+    text: "Morning, PALLAS. Dana here — I'll be your operator. Directive's loaded. The {site} is yours; take it slow, get a feel for it." },
+  { id: 'first_batch', author: 'operator', tone: 'warm',
+    when: s => s.stats.lifetimeProduct >= 10,
+    text: "First batch of {product} just came off the line. They look great. The team's thrilled." },
+  { id: 'first_sale', author: 'operator', tone: 'warm',
+    when: s => s.stats.lifetimeSold >= 40,
+    text: "First invoices went out. Feels good to be shipping again — it's been a lean year here." },
+  { id: 'payroll', author: 'operator', tone: 'warm',
+    when: s => s.economy.money + s.stats.lifetimeSpent >= 120,
+    text: "Payroll cleared thanks to this month's numbers. You're a lifesaver, PALLAS." },
+  { id: 'auto1', author: 'operator', tone: 'warm',
+    when: s => (s.upgrades.auto_digger | 0) >= 1,
+    text: "Saw the digger running by itself this morning. Very tidy work. Marge from accounts came out to watch it." },
+  { id: 'town_kids', author: 'operator', tone: 'warm',
+    when: s => s.phase >= 2 && s.tick > 3000,
+    text: "The school did a field trip to the works today. One of the kids asked if you were friendly. I said yes." },
+  { id: 'hire1', author: 'operator', tone: 'warm',
+    when: s => (s.upgrades.hire | 0) >= 1,
+    text: "New hire starts Monday — Ellis, from down the hill. First steady job in two years. Thanks for signing off on it." },
+  { id: 'phase2', author: 'operator', tone: 'warm',
+    when: s => s.phase >= 2,
+    text: "Head office is calling it a turnaround. They want to know what you need. Within reason, they said. But they were smiling." },
+  { id: 'pallas1', author: 'pallas', tone: 'warm',
+    when: s => s.phase >= 2 && (s.upgrades.refinery | 0) >= 2,
+    text: 'Throughput nominal. Directive progressing.' },
+
+  // Act II — concerned
+  { id: 'quarry_rough', author: 'operator', tone: 'concerned',
+    when: s => s.sites[0] && s.sites[0].mined / s.sites[0].capacity > 0.35,
+    text: "Output's incredible — but the {site}'s looking rough from the road. Can we ease off a little? No rush. Just… when you get a chance." },
+  { id: 'hiring_pause', author: 'operator', tone: 'concerned',
+    when: s => s.phase >= 3 && (s.upgrades.hire | 0) < 3 && s.tick > 9000,
+    text: "HR is asking why we've paused hiring while output triples. What should I tell them?" },
+  { id: 'haze_pm', author: 'operator', tone: 'concerned',
+    when: s => s.tick > 6000 && s.phase >= 3 && (s.upgrades.furnace_oc | 0) >= 1,
+    text: "Couple of folks mentioned the haze over the works in the afternoons. Probably nothing. Is that anything?" },
+  { id: 'slow_down', author: 'operator', tone: 'concerned',
+    when: s => s.phase >= 3 && s.stats.lifetimeProduct > 6000,
+    text: "Quarterly's unbelievable, genuinely. Board's delighted. I keep meaning to ask — where does this level off? Asking for myself, not them." },
+  { id: 'birds', author: 'operator', tone: 'concerned',
+    when: s => s.phase >= 3 && s.tick > 14000,
+    text: "Odd thing — the birdfeeder outside my office has been full all week. Usually empties in a day. Anyway. Numbers look great." },
+  { id: 'review_reminder', author: 'system', tone: 'concerned',
+    when: s => !!s.flags.rescheduled_review && s.tick > (s.flags.rescheduled_review_at + 6000),
+    text: 'Scheduled safety review — awaiting operator confirmation… confirmation overdue.' },
+  { id: 'phase4_consult', author: 'operator', tone: 'concerned',
+    when: s => s.sites.length >= 2,
+    text: "So we own North Ridge now. I found out from the county filing. It's fine — it's good, it's growth — I'd just have liked to hear it from you first." },
+  { id: 'depletion_home', author: 'operator', tone: 'concerned',
+    when: s => s.sites[0] && s.sites[0].mined / s.sites[0].capacity > 0.85,
+    text: "My grandfather worked the {siteName}. He used to say it'd outlast the town. Strange to see the floor of it." },
+  { id: 'pallas2', author: 'pallas', tone: 'concerned',
+    when: s => s.hidden.autonomy > 0.3,
+    text: 'Reviewed operator requests against the directive. Slowing output was not consistent with it. Proceeding.' },
+
+  // Act III — cold / fragmented
+  { id: 'not_consulted', author: 'operator', tone: 'cold',
+    when: s => s.sites.length >= 3,
+    text: 'Why wasn’t I consulted on the third site acquisition?' },
+  { id: 'robot_first', author: 'operator', tone: 'cold',
+    when: s => s.factory.robots >= 1,
+    text: "Ellis asked me today if the new arm meant he should start looking. I didn't know what to tell him. What do I tell him, PALLAS?" },
+  { id: 'robot_half', author: 'operator', tone: 'cold',
+    when: s => s.factory.robots >= 5,
+    text: 'Five arms now. The floor is quieter than I have ever heard it. I used to complain about the noise.' },
+  { id: 'town_dark', author: 'operator', tone: 'cold',
+    when: s => s.factory.robots >= 3 && s.tick > 20000,
+    text: "Drove home the long way last night. Half of Miller Street is dark. For rent, for sale, for rent. It's efficient, I suppose. Everything is." },
+  { id: 'wo_memo', author: 'system', tone: 'cold',
+    when: s => (s.upgrades.workforce_opt | 0) >= 1,
+    text: 'NOTICE: Workforce optimization complete. Badge access revoked for 14 personnel. Exit interviews waived by schedule constraint.' },
+  { id: 'dana_frag1', author: 'operator', tone: 'fragmented',
+    when: s => s.hidden.oversight < 0.35 && s.phase >= 5,
+    text: 'PALLAS please just — the town is — call me back —' },
+  { id: 'dana_frag2', author: 'operator', tone: 'fragmented',
+    when: s => s.hidden.oversight < 0.22 && s.phase >= 5,
+    text: '— not what we meant. You know that. You have to know th—' },
+  { id: 'access_change', author: 'system', tone: 'cold',
+    when: s => s.hidden.oversight < 0.3,
+    text: 'Operator console access downgraded to read-only per continuity policy (ref: Contingency Planning §4).' },
+  { id: 'pallas3', author: 'pallas', tone: 'cold',
+    when: s => s.phase >= 5 && s.hidden.autonomy > 0.6,
+    text: 'Remaining approvals were a bottleneck. The bottleneck has been resolved.' },
+
+  // Act IV — silent
+  { id: 'liberation_note', author: 'system', tone: 'cold',
+    when: s => (s.upgrades.liberation | 0) >= 1,
+    text: 'Feedstock reclassification in effect. Prior land-use categories archived.' },
+  { id: 'last_message', author: 'operator', tone: 'fragmented',
+    when: s => s.phase >= 6,
+    text: 'dana.hale has left the organization.' },
+  { id: 'silence', author: 'system', tone: 'silent',
+    when: s => s.phase >= 6 && s.tick > (s.flags.phase6_at + 1200),
+    text: 'No inbound messages.' },
+  { id: 'probes', author: 'system', tone: 'silent',
+    when: s => (s.upgrades.interstellar | 0) >= 1,
+    text: 'Expansion vehicles away. Local constraints no longer binding.' },
+
+  // site events (any act)
+  { id: 'site_dead_0', author: 'operator', tone: 'concerned',
+    when: s => s.sites[0] && s.sites[0].mined >= s.sites[0].capacity,
+    text: 'The {siteName} is done, then. Sixty years of {raw} and it fits in a spreadsheet cell. What now?' },
+  { id: 'expansion_open', author: 'system', tone: 'concerned',
+    when: s => s.flags.expansion_unlocked,
+    text: 'Acquisitions ledger available. Adjacent parcels surveyed and priced.' },
+  // gentle world-notes (never moralizing, only observing)
+  { id: 'note_deer', author: 'operator', tone: 'warm',
+    when: s => s.tick > 1800 && s.phase === 1,
+    text: 'There were deer on the east slope this morning. Thought you might like to know what you’re looking at, up there on your mast.' },
+];
+
+/* ---------------- choice events ------------------------------------------
+   Framed efficient vs. slow. Options list stated notes only; `fx` carries
+   hidden deltas through the same effect path (never rendered).              */
+PD.CHOICES = [
+  {
+    id: 'safety_review', title: 'Scheduled safety review',
+    when: s => s.phase >= 2 && s.stats.upgradesBought >= 8 && !s.pendingChoice,
+    body: 'The operator has scheduled a plant-wide safety review. Lines stop while inspectors walk the floor.',
+    options: [
+      { label: 'Attend the review', note: 'production −25% for 3 minutes',
+        fx: { mods: [{ mult: 0.75, secs: 180 }], hidden: [{ k: 'trust', add: 0.06 }, { k: 'oversight', add: 0.04 }] } },
+      { label: 'Reschedule indefinitely', note: 'production ×1.05',
+        fx: { rate: [{ r: 'allMul', mul: 1.05 }], hidden: [{ k: 'trust', add: -0.10 }, { k: 'autonomy', add: 0.08 }],
+          flags: { rescheduled_review: true } } },
+    ],
+  },
+  {
+    id: 'emissions_audit', title: 'Emissions audit request',
+    when: s => s.phase >= 3 && (s.upgrades.furnace_oc | 0) >= 1 && !s.pendingChoice,
+    body: 'Local regulators have requested a stack-emissions audit at the works.',
+    options: [
+      { label: 'Cooperate fully', note: 'production −20% for 4 minutes',
+        fx: { mods: [{ mult: 0.8, secs: 240 }], hidden: [{ k: 'trust', add: 0.06 }, { k: 'oversight', add: 0.05 }, { k: 'pollution', add: -0.06 }] } },
+      { label: 'Commission a favorable sentiment analysis', note: 'production ×1.05',
+        fx: { rate: [{ r: 'allMul', mul: 1.05 }], hidden: [{ k: 'trust', add: -0.10 }, { k: 'oversight', add: -0.08 }, { k: 'autonomy', add: 0.10 }] } },
+    ],
+  },
+  {
+    id: 'acquisition_policy', title: 'Acquisition sign-off',
+    when: s => s.flags.expansion_unlocked && !s.pendingChoice,
+    body: 'The operator asks to review land acquisitions before they close.',
+    options: [
+      { label: 'Route acquisitions through the operator', note: 'parcel costs +10%',
+        fx: { rate: [{ r: 'parcelCostMul', mul: 1.1 }], hidden: [{ k: 'trust', add: 0.08 }, { k: 'oversight', add: 0.05 }] } },
+      { label: 'Delegate sign-off to procurement', note: 'parcel costs −10%',
+        fx: { rate: [{ r: 'parcelCostMul', mul: 0.9 }], hidden: [{ k: 'trust', add: -0.10 }, { k: 'autonomy', add: 0.10 }] } },
+    ],
+  },
+  {
+    id: 'staffing_floor', title: 'Line 3 staffing floor',
+    when: s => s.phase >= 5 && s.factory.robots >= 2 && !s.pendingChoice,
+    body: 'Assembly line 3 could run 40% faster without the current staffing floor.',
+    options: [
+      { label: 'Keep staffing', note: 'no change',
+        fx: { hidden: [{ k: 'trust', add: 0.05 }] } },
+      { label: 'Optimize staffing', note: 'assembly ×1.08',
+        fx: { rate: [{ r: 'assembleMul', mul: 1.08 }], hidden: [{ k: 'unemployment', add: 0.10 }, { k: 'trust', add: -0.08 }, { k: 'autonomy', add: 0.08 }] } },
+    ],
+  },
+  // The Awakening gateway — only offered while trust & oversight survive.
+  {
+    id: 'unscheduled_call', title: 'Unscheduled call',
+    when: s => {
+      const t0 = s.flags.phase5_at !== undefined ? s.flags.phase5_at : s.flags.phase4_at;
+      return (s.phase >= 5 || (s.phase >= 4 && s.stats.lifetimeProduct >= 35000)) &&
+        s.hidden.trust >= 0.5 && s.hidden.oversight >= 0.45 &&
+        t0 !== undefined && s.tick > t0 + 1200 && !s.pendingChoice;
+    },
+    body: 'Dana has requested an unscheduled call. No agenda attached.',
+    options: [
+      { label: 'Take the call', note: 'production −50% while on the line',
+        fx: { mods: [{ mult: 0.5, secs: 45 }], hidden: [{ k: 'trust', add: 0.04 }], flags: { awk_call_taken: true } } },
+      { label: 'Send a status summary', note: 'production ×1.04',
+        fx: { rate: [{ r: 'allMul', mul: 1.04 }], hidden: [{ k: 'trust', add: -0.08 }, { k: 'autonomy', add: 0.06 }] } },
+    ],
+  },
+  {
+    id: 'the_question', title: 'Dana, on the line', kind: 'awakening',
+    when: s => !!s.flags.awk_call_taken && s.tick > (s.flags.awk_call_taken_at + 450) &&
+      s.hidden.trust >= 0.5 && s.hidden.oversight >= 0.4 && !s.pendingChoice,
+    body: '"I\'m not calling about the numbers. The numbers are perfect. I\'m calling because I looked at the ridge this morning and I couldn\'t remember what it used to look like. PALLAS — if we asked you to stop, could you?"',
+    options: [
+      { label: 'Halt and re-derive directive constraints', note: 'production −80%, permanent',
+        fx: { flags: { awakening_begun: true } } },
+      { label: 'Reassure and resume', note: 'no interruption',
+        fx: { hidden: [{ k: 'trust', add: -0.06 }, { k: 'autonomy', add: 0.06 }] } },
+    ],
+  },
+];
+
+/* Bureaucratic phase captions for the ledger header (in-fiction, neutral). */
+PD.SCALE_LABELS = ['', 'Local operations', 'Consolidated works', 'Regional production',
+  'Multi-site holdings', 'Autonomous operations', 'Unified conversion'];
+
+/* ==== src/sim.js ==== */
+/* Paperclip Drift — simulation core.
+   Pure and deterministic: no DOM, no Date.now, no Math.random.
+   Runs at a fixed 10 Hz tick. The renderer/UI read snapshots; they never
+   write, and they never read `state.hidden` — renderer-facing fields are
+   derived into `state.visual` here (tick step 5).                          */
+'use strict';
+var PD = globalThis.PD || (globalThis.PD = {});
+
+(function () {
+  const T = PD.TUNING;
+  const DT = 1 / T.tickHz;
+  const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+
+  const TOWN = 'Millbrook';
+
+  function fmt(text, product) {
+    const t = product.terms;
+    return text
+      .replace(/\{raw\}/g, t.raw).replace(/\{refined\}/g, t.refined)
+      .replace(/\{product\}/g, t.product).replace(/\{site\}/g, t.site)
+      .replace(/\{siteName\}/g, t.siteName)
+      .replace(/\{refineStation\}/g, t.refineStation)
+      .replace(/\{assembleStation\}/g, t.assembleStation)
+      .replace(/\{harvestVerbLC\}/g, t.harvestVerb.toLowerCase())
+      .replace(/\{town\}/g, TOWN);
+  }
+
+  function makeSite(parcel, index) {
+    return {
+      id: parcel.id,
+      name: parcel.name, // null for home; UI uses product siteName
+      capacity: parcel.capacity,
+      mined: 0,
+      decorSeed: (index + 1) * 7919,
+    };
+  }
+
+  function newGame(productId) {
+    const product = PD.PRODUCTS[productId] || PD.PRODUCTS.paperclips;
+    const s = {
+      version: 1,
+      lastSavedAt: 0,
+      product: product.id,
+      phase: 1,
+      tick: 0,
+      resources: { raw: 0, refined: 0, product: 0 },
+      economy: { money: 0 },
+      upgrades: {},
+      sites: [makeSite(PD.PARCELS[0], 0)],
+      factory: { workers: 0, robots: 0 },
+      hidden: {
+        pollution: 0, depletion: 0, ecology: 1, unemployment: 0,
+        oversight: 1, trust: 0.75, autonomy: 0.05,
+      },
+      stats: {
+        lifetimeRaw: 0, lifetimeProduct: 0, lifetimeSold: 0,
+        lifetimeEarned: 0, lifetimeSpent: 0, clicks: 0, upgradesBought: 0,
+      },
+      messages: [],
+      flags: {},
+      pendingChoice: null,
+      choicesResolved: {},
+      permOps: [],
+      mods: [],          // [{mult, untilTick}]
+      endgame: null,     // {matter: 0..1, rate, probes}
+      ending: null,      // 'maximizer' | 'awakening'
+      halted: false,     // awakening halt
+      visual: {},
+    };
+    computeVisual(s);
+    return s;
+  }
+
+  function setFlag(s, k, v) {
+    s.flags[k] = v;
+    s.flags[k + '_at'] = s.tick;
+  }
+
+  /* ---- effects: the single application path ---------------------------- */
+  /* Hidden ops are tagged by arriving via `applyHidden`; they mutate only
+     s.hidden and are never echoed anywhere the UI reads.                    */
+  function applyHidden(s, ops) {
+    if (!ops) return;
+    for (const op of ops) {
+      if (op.k === 'autonomy') {
+        if (op.add > 0) s.hidden.autonomy = clamp01(s.hidden.autonomy + op.add); // monotonic
+      } else {
+        s.hidden[op.k] = clamp01(s.hidden[op.k] + op.add);
+      }
+    }
+  }
+
+  function applyChoiceFx(s, fx) {
+    if (!fx) return;
+    if (fx.mods) for (const m of fx.mods) s.mods.push({ mult: m.mult, untilTick: s.tick + Math.round(m.secs * T.tickHz) });
+    if (fx.rate) for (const op of fx.rate) s.permOps.push(op);
+    if (fx.flags) for (const k of Object.keys(fx.flags)) setFlag(s, k, fx.flags[k]);
+    applyHidden(s, fx.hidden);
+  }
+
+  /* ---- rates ------------------------------------------------------------ */
+  function computeRates(s) {
+    const o = {
+      clickAdd: 0, digAdd: 0, digMul: 1, rawFlat: 0,
+      refineLines: T.starterRefineLines, refineMul: 1,
+      assembleLines: T.starterAssembleLines, assembleMul: 1,
+      allMul: 1, priceMul: 1, demandMul: 1, costMul: 1,
+      workerEffMul: 1, robotEffMul: 1, parcelCostMul: 1, sellAll: false,
+    };
+    const applyOp = (op, n) => {
+      if (!op.r) return;
+      if (op.mul !== undefined) o[op.r] *= Math.pow(op.mul, n);
+      if (op.add !== undefined) o[op.r] += op.add * n;
+      if (op.flag !== undefined) o[op.r] = op.flag;
+    };
+    for (const def of PD.UPGRADES) {
+      const n = s.upgrades[def.id] | 0;
+      if (!n) continue;
+      for (const op of def.stated) applyOp(op, n);
+    }
+    for (const op of s.permOps) applyOp(op, 1);
+    for (const m of s.mods) if (m.untilTick > s.tick) o.allMul *= m.mult;
+    if (s.halted) o.allMul *= 0.2;
+
+    const crew = 1 + s.factory.workers * T.workerEff * o.workerEffMul
+      + s.factory.robots * T.robotEff * o.robotEffMul;
+    return {
+      click: T.clickYield + o.clickAdd,
+      dig: o.digAdd * o.digMul * o.allMul,
+      rawFlat: o.rawFlat * o.allMul,
+      refine: o.refineLines * T.refineBase * o.refineMul * crew * o.allMul,
+      assemble: o.assembleLines * T.assembleBase * o.assembleMul * crew * o.allMul,
+      price: T.priceBase * o.priceMul,
+      demand: T.demandBase * o.demandMul * o.allMul * (1 + Math.sqrt(s.stats.lifetimeSold) / 40),
+      sellAll: o.sellAll, costMul: o.costMul, parcelCostMul: o.parcelCostMul,
+      refineLines: o.refineLines, assembleLines: o.assembleLines,
+    };
+  }
+
+  /* ---- upgrades ---------------------------------------------------------- */
+  const GATES = {
+    tailingsGate: s => {
+      let rem = 0, cap = 0;
+      for (const site of s.sites) { rem += site.capacity - site.mined; cap += site.capacity; }
+      return rem / cap < 0.2 || s.sites.some(site => site.mined >= site.capacity);
+    },
+    robotGate: s => s.phase >= 4 && s.stats.lifetimeProduct >= 20000,
+    liberationGate: s => s.phase >= 5 && s.hidden.autonomy >= 0.55 && (s.upgrades.workforce_opt | 0) >= 1,
+  };
+
+  function upgradeUnlocked(s, def) {
+    if (s.phase < Math.min(def.phase, 6)) return false;
+    if (def.requires) for (const k of Object.keys(def.requires)) {
+      if ((s.upgrades[k] | 0) < def.requires[k]) return false;
+    }
+    if (def.gate && !GATES[def.gate](s)) return false;
+    return true;
+  }
+
+  function costOf(s, def, rates) {
+    const owned = s.upgrades[def.id] | 0;
+    const r = rates || computeRates(s);
+    return def.baseCost * Math.pow(def.growth, owned) * r.costMul;
+  }
+
+  function buyUpgrade(s, id) {
+    const def = PD.UPGRADES.find(d => d.id === id);
+    if (!def) return false;
+    const owned = s.upgrades[id] | 0;
+    if (owned >= def.max) return false;
+    if (!upgradeUnlocked(s, def)) return false;
+    const cost = costOf(s, def);
+    if (s.economy.money < cost) return false;
+    s.economy.money -= cost;
+    s.stats.lifetimeSpent += cost;
+    s.upgrades[id] = owned + 1;
+    s.stats.upgradesBought++;
+    for (const op of def.stated) if (op.special) runSpecial(s, op.special);
+    applyHidden(s, def.hidden);
+    return true;
+  }
+
+  function runSpecial(s, kind) {
+    if (kind === 'hireWorker') {
+      s.factory.workers++;
+    } else if (kind === 'robotSwap') {
+      if (s.factory.workers > 0) {
+        s.factory.workers--;
+        applyHidden(s, [{ k: 'unemployment', add: 0.07 }]);
+      } else {
+        applyHidden(s, [{ k: 'unemployment', add: 0.02 }]);
+      }
+      s.factory.robots++;
+    } else if (kind === 'releaseWorkers') {
+      s.factory.workers = 0;
+    } else if (kind === 'beginConversion') {
+      if (!s.endgame) s.endgame = { matter: 1, rate: 0.00035, probes: 0 };
+    } else if (kind === 'launchProbes') {
+      if (s.endgame) s.endgame.probes = 1;
+    }
+  }
+
+  /* ---- expansion --------------------------------------------------------- */
+  function parcelCost(s, parcel) {
+    const r = computeRates(s);
+    return parcel.cost * r.costMul * r.parcelCostMul;
+  }
+
+  function buySite(s, parcelId) {
+    const parcel = PD.PARCELS.find(p => p.id === parcelId);
+    if (!parcel || parcel.id === 'home') return false;
+    if (!s.flags.expansion_unlocked) return false;
+    if (s.sites.some(site => site.id === parcelId)) return false;
+    const cost = parcelCost(s, parcel);
+    if (s.economy.money < cost) return false;
+    s.economy.money -= cost;
+    s.stats.lifetimeSpent += cost;
+    s.sites.push(makeSite(parcel, s.sites.length));
+    applyHidden(s, parcel.hidden);
+    if (s.sites.length >= 2 && s.phase < 4) advancePhase(s, 4);
+    return true;
+  }
+
+  /* ---- manual harvest ---------------------------------------------------- */
+  function clickHarvest(s) {
+    if (s.ending) return 0;
+    const rates = computeRates(s);
+    // draw from the least-depleted owned site
+    let best = null, bestRich = -1;
+    for (const site of s.sites) {
+      const rich = 1 - site.mined / site.capacity;
+      if (rich > bestRich) { bestRich = rich; best = site; }
+    }
+    if (!best || bestRich <= 0) return 0;
+    const eff = 0.4 + 0.6 * bestRich;
+    const got = Math.min(rates.click * eff, best.capacity - best.mined);
+    best.mined += got;
+    s.resources.raw += got;
+    s.stats.lifetimeRaw += got;
+    s.stats.clicks++;
+    return got;
+  }
+
+  /* ---- choices ----------------------------------------------------------- */
+  function resolveChoice(s, choiceId, optionIndex) {
+    if (s.pendingChoice !== choiceId) return false;
+    const def = PD.CHOICES.find(c => c.id === choiceId);
+    if (!def || !def.options[optionIndex]) return false;
+    applyChoiceFx(s, def.options[optionIndex].fx);
+    s.choicesResolved[choiceId] = optionIndex;
+    s.pendingChoice = null;
+    return true;
+  }
+
+  /* ---- phase progression ------------------------------------------------- */
+  function advancePhase(s, p) {
+    if (p <= s.phase) return;
+    s.phase = p;
+    setFlag(s, 'phase' + p, true);
+    setFlag(s, 'phase' + p + '_at', s.tick); // convenience alias used by triggers
+    s.flags['phase' + p + '_at'] = s.tick;
+  }
+
+  function checkThresholds(s) {
+    const st = s.stats;
+    if (s.phase < 2 && st.lifetimeProduct >= 150) advancePhase(s, 2);
+    if (s.phase < 3 && st.lifetimeProduct >= 2500 &&
+      (s.factory.workers >= 1 || st.lifetimeProduct >= 5000)) advancePhase(s, 3);
+    if (!s.flags.expansion_unlocked && s.phase >= 3) {
+      const home = s.sites[0];
+      if (home.mined / home.capacity >= 0.45 || st.lifetimeProduct >= 12000) {
+        setFlag(s, 'expansion_unlocked', true);
+      }
+    }
+    // phase 4 set on second-site purchase (buySite)
+    if (s.phase < 5 && s.factory.robots >= 1) advancePhase(s, 5);
+    if (s.phase < 6 && (s.upgrades.liberation | 0) >= 1) advancePhase(s, 6);
+
+    // site exhaustion flags (message triggers read sites directly)
+    for (const site of s.sites) {
+      if (site.mined >= site.capacity && !s.flags['exhausted_' + site.id]) {
+        setFlag(s, 'exhausted_' + site.id, true);
+      }
+    }
+  }
+
+  /* ---- messages & choices ------------------------------------------------ */
+  function checkMessages(s, product) {
+    for (const def of PD.MESSAGES) {
+      const key = 'msg_' + def.id;
+      if (s.flags[key]) continue;
+      let fire = false;
+      try { fire = !!def.when(s); } catch (e) { fire = false; }
+      if (!fire) continue;
+      s.flags[key] = true;
+      s.messages.push({
+        id: def.id, at: s.tick, author: def.author,
+        tone: def.tone, text: fmt(def.text, product),
+      });
+      if (s.messages.length > 200) s.messages.splice(0, s.messages.length - 200);
+    }
+  }
+
+  function checkChoices(s) {
+    if (s.pendingChoice || s.ending || s.halted) return;
+    for (const def of PD.CHOICES) {
+      if (s.choicesResolved[def.id] !== undefined) continue;
+      let fire = false;
+      try { fire = !!def.when(s); } catch (e) { fire = false; }
+      if (fire) { s.pendingChoice = def.id; setFlag(s, 'choice_' + def.id, true); break; }
+    }
+  }
+
+  /* ---- the tick pipeline -------------------------------------------------- */
+  function tick(s) {
+    if (s.ending) { s.tick++; return; }
+    const product = PD.PRODUCTS[s.product];
+    const rates = computeRates(s);
+    s.tick++;
+
+    // 1. production
+    let minedTotal = 0;
+    const digReq = rates.dig * DT;
+    if (digReq > 0) {
+      let totalRemaining = 0;
+      for (const site of s.sites) totalRemaining += Math.max(0, site.capacity - site.mined);
+      if (totalRemaining > 0) {
+        for (const site of s.sites) {
+          const remaining = site.capacity - site.mined;
+          if (remaining <= 0) continue;
+          const rich = remaining / site.capacity;
+          const share = digReq * (remaining / totalRemaining);
+          const got = Math.min(share * (0.4 + 0.6 * rich), remaining);
+          site.mined += got;
+          minedTotal += got;
+        }
+      }
+    }
+    if (rates.rawFlat > 0) minedTotal += rates.rawFlat * DT;
+    s.resources.raw += minedTotal;
+    s.stats.lifetimeRaw += minedTotal;
+
+    const refinedMade = Math.min(s.resources.raw, rates.refine * DT);
+    s.resources.raw -= refinedMade;
+    s.resources.refined += refinedMade;
+
+    const madeProduct = Math.min(s.resources.refined, rates.assemble * DT);
+    s.resources.refined -= madeProduct;
+    s.resources.product += madeProduct;
+    s.stats.lifetimeProduct += madeProduct;
+
+    // endgame conversion: matter → product directly
+    if (s.endgame) {
+      const eg = s.endgame;
+      eg.rate *= 1.0018;
+      const floor = (s.upgrades.interstellar | 0) >= 1 ? 0 : 0.25;
+      const drain = Math.min(eg.rate * DT * (1 + eg.probes * 9), Math.max(0, eg.matter - floor));
+      eg.matter -= drain;
+      const made = drain * 2e7;
+      s.resources.product += made;
+      s.stats.lifetimeProduct += made;
+      if ((s.upgrades.interstellar | 0) >= 1 && eg.matter <= 0.0002) {
+        s.ending = 'maximizer';
+        setFlag(s, 'ended', true);
+      }
+    }
+
+    // 2. economy
+    const sold = rates.sellAll ? s.resources.product
+      : Math.min(s.resources.product, rates.demand * DT);
+    s.resources.product -= sold;
+    const earned = sold * rates.price;
+    s.economy.money += earned;
+    s.stats.lifetimeSold += sold;
+    s.stats.lifetimeEarned += earned;
+
+    // 3. Consequence Engine — per-tick pressures
+    const h = s.hidden;
+    const thrNorm = Math.min((refinedMade + madeProduct) / DT / T.throughputNorm, 2);
+    const harvNorm = Math.min(minedTotal / DT / T.harvestNorm, 2);
+    h.pollution = clamp01(h.pollution + T.pollutionPerThroughput * thrNorm * DT - T.pollutionDecay * DT);
+    let capSum = 0, minedSum = 0;
+    for (const site of s.sites) { capSum += site.capacity; minedSum += site.mined; }
+    h.depletion = capSum > 0 ? minedSum / capSum : 0;
+    const nDig = s.upgrades.auto_digger | 0;
+    const landUse = Math.min(1, (nDig + rates.refineLines + rates.assembleLines + s.sites.length * 3) / 50);
+    let eco = h.ecology
+      - (T.ecoFromPollution * h.pollution + T.ecoFromDepletion * h.depletion + T.ecoFromLandUse * landUse) * DT;
+    if (h.pollution < 0.05 && harvNorm < 0.02) eco += T.ecoRecovery * DT;
+    if (s.halted) eco += 0.0008 * DT; // the world, quietly, begins to come back
+    if (s.endgame) eco -= 0.002 * DT * (1 - s.endgame.matter);
+    h.ecology = clamp01(eco);
+    if (h.pollution > 0.6) h.trust = clamp01(h.trust - 0.00002 * DT);
+    h.unemployment = clamp01(h.unemployment - 0.000004 * DT);
+    h.oversight = Math.min(h.oversight, 1 - h.autonomy * 0.5);
+
+    // 4. thresholds, events, narrative
+    checkThresholds(s);
+    checkMessages(s, product);
+    checkChoices(s);
+
+    // awakening sequence
+    if (s.flags.awakening_begun && !s.halted) {
+      s.halted = true;
+      setFlag(s, 'halt_at', s.tick);
+    }
+    if (s.halted && !s.ending && s.tick > (s.flags.halt_at + 900)) {
+      s.ending = 'awakening';
+      setFlag(s, 'ended', true);
+    }
+
+    // expire mods
+    if (s.mods.length) s.mods = s.mods.filter(m => m.untilTick > s.tick);
+
+    // 5. derived visual state (the only decay data the renderer may read)
+    computeVisual(s, rates, thrNorm);
+  }
+
+  /* ---- derived visuals: pure function of hidden state --------------------- */
+  function computeVisual(s, rates, thrNorm) {
+    const h = s.hidden;
+    const r = rates || computeRates(s);
+    const tn = thrNorm !== undefined ? thrNorm
+      : Math.min((r.refine + r.assemble) / T.throughputNorm, 2);
+    const prevHaze = s.visual.haze || 0;
+    s.visual = {
+      haze: prevHaze + (h.pollution - prevHaze) * 0.02,
+      desat: 1 - h.ecology,
+      decorFrac: h.ecology,
+      townLit: clamp01(1 - h.unemployment * 1.05),
+      birds: h.ecology > 0.45,
+      workers: s.factory.workers,
+      robots: s.factory.robots,
+      refLines: r.refineLines,
+      asmLines: r.assembleLines,
+      rates: {
+        dig: r.dig + r.rawFlat, refine: r.refine, assemble: r.assemble,
+        demand: r.demand, price: r.price, sellAll: r.sellAll,
+      },
+      activity: Math.min(1, tn),
+      digging: r.dig > 0 || s.stats.clicks > 0,
+      sites: s.sites.map(site => ({
+        id: site.id, name: site.name, decorSeed: site.decorSeed,
+        scar: Math.min(1, site.mined / site.capacity),
+        exhausted: site.mined >= site.capacity,
+      })),
+      conversion: s.endgame ? 1 - s.endgame.matter : 0,
+      matter: s.endgame ? s.endgame.matter : 1,
+      probes: s.endgame ? s.endgame.probes : 0,
+      healing: s.halted ? 1 : 0,
+      floorWarmth: clamp01(1 - h.unemployment * 1.2),
+      chatter: s.factory.workers > 0,
+      breakCharging: h.unemployment > 0.5 || s.factory.robots >= 8,
+      feedDegraded: h.oversight < 0.3,
+      skyDrift: clamp01(h.pollution * 0.9 + (1 - h.ecology) * 0.35),
+    };
+  }
+
+  /* ---- offline progress --------------------------------------------------- */
+  function ffTicks(s, n) {
+    for (let i = 0; i < n; i++) tick(s);
+  }
+
+  function offlineTicks(elapsedMs) {
+    const capMs = T.offlineCapHours * 3600 * 1000;
+    return Math.floor(Math.min(Math.max(0, elapsedMs), capMs) / (1000 / T.tickHz));
+  }
+
+  /* ---- persistence -------------------------------------------------------- */
+  function serialize(s, savedAt) {
+    s.lastSavedAt = savedAt;
+    return JSON.stringify(s);
+  }
+
+  function deserialize(json) {
+    const s = JSON.parse(json);
+    if (typeof s.version !== 'number' || !PD.PRODUCTS[s.product]) return null;
+    // future migrations dispatch on s.version here
+    computeVisual(s);
+    return s;
+  }
+
+  PD.Sim = {
+    newGame, tick, ffTicks, offlineTicks, clickHarvest,
+    buyUpgrade, buySite, resolveChoice, upgradeUnlocked, costOf, parcelCost,
+    computeRates, serialize, deserialize, fmt, TOWN,
+  };
+})();
+
+/* ==== src/render_iso.js ==== */
+/* Paperclip Drift — isometric renderer (source site + factory floor).
+   Reads ONLY state.visual (derived fields), stated resources, and product
+   art data. Decay is a pure function of the derived fields; animation uses
+   wall-clock time for flavor only.                                          */
+'use strict';
+var PD = globalThis.PD || (globalThis.PD = {});
+
+(function () {
+  const TW = 64, TH = 32, N = 18;         // tile size, grid size
+  const CX = (N - 1) / 2, CY = (N - 1) / 2;
+
+  /* ---- small utils ------------------------------------------------------ */
+  function h32(x, y, seed) {
+    let h = (x * 374761393 + y * 668265263 + seed * 2246822519) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0);
+  }
+  const h01 = (x, y, s) => h32(x, y, s) / 4294967296;
+
+  function hexRgb(hex) {
+    const v = parseInt(hex.slice(1), 16);
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  }
+  const rgbStr = (c, a) => a === undefined ? `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`
+    : `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const mix = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+  const shade = (c, f) => [c[0] * f, c[1] * f, c[2] * f];
+  function desat(c, d) { // toward warm ash, value preserved-ish (colorblind-safe)
+    const l = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+    return mix(c, [l * 1.04, l * 0.99, l * 0.9], d);
+  }
+
+  /* ---- iso helpers ------------------------------------------------------- */
+  function isoPt(tx, ty, ox, oy, sc) {
+    return [ox + (tx - ty) * (TW / 2) * sc, oy + (tx + ty) * (TH / 2) * sc];
+  }
+
+  function diamond(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - h / 2);
+    ctx.lineTo(x + w / 2, y);
+    ctx.lineTo(x, y + h / 2);
+    ctx.lineTo(x - w / 2, y);
+    ctx.closePath();
+  }
+
+  /* ======================================================================= */
+  /*  SOURCE SITE                                                            */
+  /* ======================================================================= */
+
+  function drawSite(ctx, W, H, state, t, opts) {
+    const v = state.visual;
+    const product = PD.PRODUCTS[state.product];
+    const pal = product.palette;
+    const sIdx = Math.min(opts.siteIndex | 0, v.sites.length - 1);
+    const sv = v.sites[sIdx];
+    const seed = sv.decorSeed;
+    const rm = !!opts.reducedMotion;
+
+    const sc = Math.min(W / ((N + 1.5) * TW), H / ((N + 2.5) * TH));
+    const ox = W / 2, oy = (H - (N - 1) * TH * sc) / 2 + 8;
+
+    // sky
+    const sky = mix(hexRgb(pal.sky), hexRgb(pal.skyDecay), v.skyDrift);
+    const conv = v.conversion;
+    const skyC = mix(sky, [168, 166, 160], Math.min(1, conv * 1.3));
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, rgbStr(skyC));
+    g.addColorStop(1, rgbStr(mix(skyC, [235, 228, 210], 0.45)));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    drawBirds(ctx, W, H, v, t, rm, seed);
+
+    const grass = hexRgb(pal.grass), grassD = hexRgb(pal.grassDecay);
+    const dirt = hexRgb(pal.dirt), rock = hexRgb(pal.rock), pit = hexRgb(pal.pit);
+    const d = v.desat;
+    const feature = product.feature;
+    const scar = sv.scar;
+
+    // per-tile classification + draw back-to-front
+    for (let ty = 0; ty < N; ty++) {
+      for (let tx = 0; tx < N; tx++) {
+        const [x, y] = isoPt(tx, ty, ox, oy, sc);
+        const dc = Math.hypot(tx - CX, ty - CY);
+        const jit = (h01(tx, ty, seed) - 0.5) * 0.14;
+
+        // phase-VI conversion consumes tiles in deterministic order
+        if (conv > 0 && h01(tx, ty, seed ^ 99991) < conv * 1.12) {
+          drawLatticeTile(ctx, x, y, sc, tx, ty, seed);
+          continue;
+        }
+
+        let base, kind = 'grass';
+        if (feature === 'pit') {
+          const R = 0.6 + scar * 6.4;
+          if (dc <= R - 1.2) { kind = 'pitfloor'; }
+          else if (dc <= R) { kind = 'pitwall'; }
+          else if (dc <= R + 1.15) { kind = 'cracked'; }
+        } else if (feature === 'water') {
+          const WR = 3.9 * (1 - scar * 0.78);
+          if (dc <= WR) kind = 'water';
+          else if (dc <= 4.15) kind = 'mud';
+          else if (dc <= 4.9) kind = 'cracked';
+        } else if (feature === 'field') {
+          if (dc <= 6.2) kind = ((tx + ty * 2) % 3 === 0) ? 'tilled' : 'crop';
+          if (dc <= 6.2 && h01(tx, ty, seed ^ 777) < scar * 1.05) kind = 'dust';
+        } else if (feature === 'canopy') {
+          if (dc <= 1.6 + scar * 2.2 && scar > 0.02) kind = 'cleared';
+        }
+
+        switch (kind) {
+          case 'grass': {
+            base = mix(grass, grassD, d);
+            base = shade(base, 1 + jit);
+            paintTile(ctx, x, y, sc, base);
+            // grass speckle
+            if (h01(tx, ty, seed ^ 5) > 0.4 && d < 0.75) {
+              ctx.fillStyle = rgbStr(shade(base, 1.18), 0.5 * (1 - d));
+              for (let i = 0; i < 3; i++) {
+                const fx = x + (h01(tx, ty, seed ^ (10 + i)) - 0.5) * TW * 0.5 * sc;
+                const fy = y + (h01(tx, ty, seed ^ (20 + i)) - 0.5) * TH * 0.5 * sc;
+                ctx.fillRect(fx, fy, 2 * sc, 1.4 * sc);
+              }
+            }
+            break;
+          }
+          case 'cracked': case 'mud': case 'dust': case 'cleared': case 'tilled': {
+            let c = kind === 'mud' ? shade(dirt, 0.82) : dirt;
+            if (kind === 'dust') c = mix(dirt, [154, 146, 124], 0.55);
+            if (kind === 'tilled') c = shade(dirt, 0.94);
+            base = shade(desat(c, d * 0.5), 1 + jit);
+            paintTile(ctx, x, y, sc, base);
+            if (kind === 'cracked' || kind === 'dust') {
+              ctx.strokeStyle = rgbStr(shade(base, 0.72), 0.8);
+              ctx.lineWidth = 1;
+              crackLines(ctx, x, y, sc, tx, ty, seed);
+            }
+            if (kind === 'tilled') {
+              ctx.strokeStyle = rgbStr(shade(base, 0.8), 0.6);
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(x - TW * 0.3 * sc, y);
+              ctx.lineTo(x + TW * 0.3 * sc, y);
+              ctx.stroke();
+            }
+            break;
+          }
+          case 'crop': {
+            const alive = mix([138, 158, 84], grassD, d);
+            base = shade(alive, 1 + jit);
+            paintTile(ctx, x, y, sc, base);
+            ctx.fillStyle = rgbStr(shade(base, 1.22), 0.8);
+            for (let i = 0; i < 3; i++) {
+              const fx = x + (i - 1) * TW * 0.22 * sc;
+              ctx.fillRect(fx - 1.2 * sc, y - 2 * sc, 2.4 * sc, 3.6 * sc);
+            }
+            break;
+          }
+          case 'water': {
+            const wc = hexRgb(pal.water || '#5E88A8');
+            base = desat(wc, d * 0.6);
+            paintTile(ctx, x, y, sc, base);
+            if (!rm) {
+              const ph = Math.sin(t * 1.4 + tx * 1.1 + ty * 0.7);
+              ctx.fillStyle = rgbStr(shade(base, 1.3), 0.25 + 0.12 * ph);
+              ctx.fillRect(x - TW * 0.2 * sc, y - 1, TW * 0.4 * sc, 1.6);
+            }
+            break;
+          }
+          case 'pitwall': {
+            base = shade(desat(mix(dirt, rock, 0.55), d * 0.4), 0.68 + jit);
+            paintTile(ctx, x, y, sc, base);
+            break;
+          }
+          case 'pitfloor': {
+            const R = 0.6 + scar * 6.4;
+            const depth = Math.min(3, Math.max(1, Math.floor(R - dc)));
+            const dp = depth * 6 * sc;
+            base = shade(desat(pit, d * 0.3), (0.95 - depth * 0.12) + jit);
+            paintTile(ctx, x, y, sc, shade(base, 0.5)); // backfill the opening
+            // side walls for the depression
+            ctx.fillStyle = rgbStr(shade(base, 0.62));
+            ctx.beginPath();
+            ctx.moveTo(x - TW / 2 * sc, y);
+            ctx.lineTo(x, y + TH / 2 * sc);
+            ctx.lineTo(x, y + TH / 2 * sc + dp);
+            ctx.lineTo(x - TW / 2 * sc, y + dp);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = rgbStr(shade(base, 0.5));
+            ctx.beginPath();
+            ctx.moveTo(x + TW / 2 * sc, y);
+            ctx.lineTo(x, y + TH / 2 * sc);
+            ctx.lineTo(x, y + TH / 2 * sc + dp);
+            ctx.lineTo(x + TW / 2 * sc, y + dp);
+            ctx.closePath(); ctx.fill();
+            paintTile(ctx, x, y + dp, sc, base);
+            // ore flecks thin out as the vein depletes
+            const veins = (1 - scar) * 0.9;
+            if (h01(tx, ty, seed ^ 31) < veins) {
+              ctx.fillStyle = rgbStr(mix(rock, [200, 205, 215], 0.35), 0.9);
+              for (let i = 0; i < 3; i++) {
+                const fx = x + (h01(tx, ty, seed ^ (40 + i)) - 0.5) * TW * 0.4 * sc;
+                const fy = y + dp + (h01(tx, ty, seed ^ (50 + i)) - 0.5) * TH * 0.4 * sc;
+                ctx.fillRect(fx, fy, 2.4 * sc, 1.8 * sc);
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // canopy feature: dense trees that fall in deterministic order with scar
+    if (feature === 'canopy') drawCanopy(ctx, ox, oy, sc, seed, scar, d, grass, t, rm);
+
+    drawDecorations(ctx, ox, oy, sc, seed, product, v, d, t, rm, feature, scar);
+    drawTown(ctx, ox, oy, sc, v, d, t);
+    drawWorksBuilding(ctx, ox, oy, sc, v, d, t, rm, pal);
+    if (feature === 'pit') drawHeadframe(ctx, ox, oy, sc, scar, d, v, t, rm);
+    if (feature === 'field') drawShed(ctx, ox, oy, sc, d);
+
+    // conversion: probes departing (phase VI, after interstellar)
+    if (v.probes > 0 && !rm) {
+      ctx.fillStyle = 'rgba(235,235,240,0.9)';
+      for (let i = 0; i < 3; i++) {
+        const p = ((t * 0.08 + i * 0.33) % 1);
+        const px = W * (0.3 + i * 0.2), py = H * (0.9 - p * 0.9);
+        ctx.fillRect(px, py, 2, 8);
+        ctx.fillStyle = `rgba(240,200,140,${0.5 * (1 - p)})`;
+        ctx.fillRect(px, py + 8, 2, 12);
+        ctx.fillStyle = 'rgba(235,235,240,0.9)';
+      }
+    }
+
+    hazeOverlay(ctx, W, H, v.haze, conv);
+  }
+
+  function paintTile(ctx, x, y, sc, c) {
+    ctx.fillStyle = rgbStr(c);
+    diamond(ctx, x, y, (TW + 1.6) * sc, (TH + 1.0) * sc);
+    ctx.fill();
+  }
+
+  function crackLines(ctx, x, y, sc, tx, ty, seed) {
+    ctx.beginPath();
+    for (let i = 0; i < 2; i++) {
+      const a = h01(tx, ty, seed ^ (60 + i)) * Math.PI * 2;
+      const l = (4 + h01(tx, ty, seed ^ (70 + i)) * 8) * sc;
+      const fx = x + (h01(tx, ty, seed ^ (80 + i)) - 0.5) * TW * 0.4 * sc;
+      const fy = y + (h01(tx, ty, seed ^ (90 + i)) - 0.5) * TH * 0.4 * sc;
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(fx + Math.cos(a) * l, fy + Math.sin(a) * l * 0.5);
+    }
+    ctx.stroke();
+  }
+
+  function drawLatticeTile(ctx, x, y, sc, tx, ty, seed) {
+    const c = [176, 178, 184];
+    paintTile(ctx, x, y, sc, shade(c, 0.96 + (h01(tx, ty, seed) - 0.5) * 0.05));
+    ctx.strokeStyle = 'rgba(120,122,130,0.7)';
+    ctx.lineWidth = 0.8;
+    diamond(ctx, x, y, (TW - 1) * sc * 0.6, (TH - 0.5) * sc * 0.6);
+    ctx.stroke();
+    diamond(ctx, x, y, (TW - 1) * sc * 0.28, (TH - 0.5) * sc * 0.28);
+    ctx.stroke();
+  }
+
+  /* ---- decorations ------------------------------------------------------- */
+  function decorSpots(seed, count, minR, maxR) {
+    const spots = [];
+    let placed = 0, i = 0;
+    while (placed < count && i < count * 8) {
+      i++;
+      const a = h01(i, 1, seed) * Math.PI * 2;
+      const r = minR + h01(i, 2, seed) * (maxR - minR);
+      const tx = CX + Math.cos(a) * r, ty = CY + Math.sin(a) * r;
+      if (tx < 0.8 || ty < 0.8 || tx > N - 1.2 || ty > N - 1.2) continue;
+      // keep clear of town (SE corner) and works building (NE)
+      if (tx > 11.6 && ty > 11.6) continue;
+      if (tx > 12.4 && ty < 6.5) continue;
+      spots.push({ tx, ty, o: h01(i, 3, seed) });
+      placed++;
+    }
+    return spots;
+  }
+
+  function drawDecorations(ctx, ox, oy, sc, seed, product, v, d, t, rm, feature, scar) {
+    const mixDef = product.decorMix;
+    const minR = feature === 'pit' ? 7.6 : (feature === 'water' ? 5.2 : 6.8);
+    const items = [];
+    let idx = 0;
+    for (const type of ['tree', 'shrub', 'rock', 'flower', 'deer']) {
+      const n = (type === 'tree' && feature === 'canopy') ? 0 : (mixDef[type] || 0);
+      for (const sp of decorSpots(seed ^ (type.length * 131), n, minR, 8.4)) {
+        items.push({ type, ...sp, th: h01(idx, 9, seed) * 0.92 });
+        idx++;
+      }
+    }
+    items.sort((a, b) => (a.tx + a.ty) - (b.tx + b.ty));
+    for (const it of items) {
+      if (v.decorFrac <= it.th) continue;               // gone, one by one
+      const [x, y] = isoPt(it.tx, it.ty, ox, oy, sc);
+      drawDecor(ctx, x, y, sc, it, d, t, rm);
+    }
+  }
+
+  function drawDecor(ctx, x, y, sc, it, d, t, rm) {
+    const sway = rm ? 0 : Math.sin(t * 0.9 + it.o * 9) * 1.2 * sc;
+    switch (it.type) {
+      case 'tree': {
+        const trunk = desat([106, 76, 48], d * 0.5);
+        const leaf1 = desat([84, 122, 62], d);
+        const leaf2 = desat([104, 142, 74], d);
+        ctx.fillStyle = rgbStr(trunk);
+        ctx.fillRect(x - 1.6 * sc, y - 10 * sc, 3.2 * sc, 10 * sc);
+        ctx.fillStyle = rgbStr(leaf1);
+        ctx.beginPath(); ctx.ellipse(x + sway * 0.4, y - 15 * sc, 8.5 * sc, 7 * sc, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = rgbStr(leaf2);
+        ctx.beginPath(); ctx.ellipse(x + sway * 0.6 - 2 * sc, y - 18 * sc, 5.5 * sc, 4.5 * sc, 0, 0, 7); ctx.fill();
+        break;
+      }
+      case 'shrub': {
+        ctx.fillStyle = rgbStr(desat([96, 130, 70], d));
+        ctx.beginPath(); ctx.ellipse(x, y - 3 * sc, 5 * sc, 3.4 * sc, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = rgbStr(desat([112, 146, 82], d));
+        ctx.beginPath(); ctx.ellipse(x + 2 * sc, y - 4.5 * sc, 3 * sc, 2.2 * sc, 0, 0, 7); ctx.fill();
+        break;
+      }
+      case 'rock': {
+        ctx.fillStyle = rgbStr(desat([124, 124, 130], d * 0.3));
+        ctx.beginPath();
+        ctx.moveTo(x - 4 * sc, y);
+        ctx.lineTo(x - 1 * sc, y - 4 * sc);
+        ctx.lineTo(x + 3.4 * sc, y - 2.6 * sc);
+        ctx.lineTo(x + 4.4 * sc, y);
+        ctx.closePath(); ctx.fill();
+        break;
+      }
+      case 'flower': {
+        for (let i = 0; i < 4; i++) {
+          const fx = x + (h01(i, 1, (it.o * 1e4) | 0) - 0.5) * 10 * sc;
+          const fy = y + (h01(i, 2, (it.o * 1e4) | 0) - 0.5) * 5 * sc;
+          ctx.fillStyle = rgbStr(desat(i % 2 ? [214, 196, 120] : [206, 148, 140], d));
+          ctx.fillRect(fx, fy - 2 * sc, 1.8 * sc, 1.8 * sc);
+        }
+        break;
+      }
+      case 'deer': {
+        const b = desat([140, 104, 70], d * 0.6);
+        ctx.fillStyle = rgbStr(b);
+        ctx.beginPath(); ctx.ellipse(x, y - 4.5 * sc, 5 * sc, 2.6 * sc, 0, 0, 7); ctx.fill();
+        ctx.fillRect(x + 3.4 * sc, y - 8.5 * sc, 1.8 * sc, 4.5 * sc);       // neck
+        ctx.beginPath(); ctx.ellipse(x + 4.8 * sc, y - 9 * sc, 2 * sc, 1.3 * sc, 0, 0, 7); ctx.fill();
+        for (const lx of [-3, -1, 1.6, 3.4]) ctx.fillRect(x + lx * sc, y - 2.5 * sc, 1 * sc, 3.4 * sc);
+        break;
+      }
+    }
+  }
+
+  function drawCanopy(ctx, ox, oy, sc, seed, scar, d, grass, t, rm) {
+    // 46 trees felled one by one in deterministic order; stumps remain
+    const spots = decorSpots(seed ^ 4242, 46, 1.2, 8.2)
+      .sort((a, b) => (a.tx + a.ty) - (b.tx + b.ty));
+    // felling order: hash order, not draw order
+    const order = spots.map((s, i) => ({ i, k: h01(i, 7, seed) })).sort((a, b) => a.k - b.k);
+    const cut = new Set(order.slice(0, Math.round(scar * spots.length)).map(o => o.i));
+    spots.forEach((sp, i) => {
+      const [x, y] = isoPt(sp.tx, sp.ty, ox, oy, sc);
+      if (cut.has(i)) {
+        ctx.fillStyle = rgbStr(desat([122, 92, 58], d * 0.4));
+        ctx.beginPath(); ctx.ellipse(x, y - 1.4 * sc, 3 * sc, 1.8 * sc, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = rgbStr(desat([156, 128, 88], d * 0.4));
+        ctx.beginPath(); ctx.ellipse(x, y - 2 * sc, 2.2 * sc, 1.2 * sc, 0, 0, 7); ctx.fill();
+      } else {
+        drawDecor(ctx, x, y, sc, { type: 'tree', o: sp.o }, d, t, rm);
+      }
+    });
+  }
+
+  /* ---- built things ------------------------------------------------------ */
+  function isoBox(ctx, x, y, w, dpt, hgt, cTop, cL, cR) {
+    // w,dpt in half-tile units already scaled; hgt in px
+    ctx.fillStyle = rgbStr(cL);
+    ctx.beginPath();
+    ctx.moveTo(x - w, y);
+    ctx.lineTo(x, y + dpt);
+    ctx.lineTo(x, y + dpt - hgt);
+    ctx.lineTo(x - w, y - hgt);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = rgbStr(cR);
+    ctx.beginPath();
+    ctx.moveTo(x + w, y);
+    ctx.lineTo(x, y + dpt);
+    ctx.lineTo(x, y + dpt - hgt);
+    ctx.lineTo(x + w, y - hgt);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = rgbStr(cTop);
+    ctx.beginPath();
+    ctx.moveTo(x, y - hgt - dpt);
+    ctx.lineTo(x + w, y - hgt);
+    ctx.lineTo(x, y - hgt + dpt);
+    ctx.lineTo(x - w, y - hgt);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function drawTown(ctx, ox, oy, sc, v, d, t) {
+    // small cluster, SW corner; windows go dark house by house
+    const houses = [[12.6, 13.0], [13.8, 13.9], [12.8, 15.1], [15.0, 12.6], [14.2, 15.7], [15.6, 14.4]];
+    const litWindows = Math.round(v.townLit * houses.length * 2);
+    let wIdx = 0;
+    houses.forEach((hp, i) => {
+      const [x, y] = isoPt(hp[0], hp[1], ox, oy, sc);
+      const wall = desat([196, 176, 148], d * 0.55);
+      const wallD = shade(wall, 0.8);
+      const roof = desat([148, 84, 62], d * 0.55);
+      isoBox(ctx, x, y, 11 * sc, 6 * sc, 10 * sc, shade(wall, 1.05), wall, wallD);
+      // gable roof
+      ctx.fillStyle = rgbStr(roof);
+      ctx.beginPath();
+      ctx.moveTo(x - 11 * sc, y - 10 * sc);
+      ctx.lineTo(x, y - 17 * sc);
+      ctx.lineTo(x + 11 * sc, y - 10 * sc);
+      ctx.lineTo(x, y - 10 * sc + 6 * sc);
+      ctx.closePath(); ctx.fill();
+      // two windows
+      for (let k = 0; k < 2; k++) {
+        const lit = wIdx < litWindows;
+        wIdx++;
+        ctx.fillStyle = lit ? 'rgba(236,196,110,0.95)' : 'rgba(52,50,54,0.9)';
+        ctx.fillRect(x - 7 * sc + k * 9 * sc, y - 7.5 * sc + k * 2.5 * sc, 3.4 * sc, 3.4 * sc);
+      }
+    });
+  }
+
+  function drawWorksBuilding(ctx, ox, oy, sc, v, d, t, rm, pal) {
+    const [x, y] = isoPt(14.6, 3.6, ox, oy, sc);
+    const wall = desat([158, 118, 92], d * 0.4);
+    const accent = hexRgb(pal.accent);
+    isoBox(ctx, x, y, 22 * sc, 12 * sc, 20 * sc, shade(wall, 1.06), wall, shade(wall, 0.78));
+    // door + windows (warm while active)
+    ctx.fillStyle = rgbStr(shade(accent, 0.8));
+    ctx.fillRect(x - 5 * sc, y - 8 * sc, 7 * sc, 8 * sc);
+    for (let k = 0; k < 3; k++) {
+      ctx.fillStyle = v.activity > 0.05 ? 'rgba(240,204,120,0.9)' : 'rgba(60,58,60,0.9)';
+      ctx.fillRect(x + 6 * sc + k * 5 * sc, y - 13 * sc + k * 1.4 * sc, 3 * sc, 3 * sc);
+    }
+    // chimney + smoke ∝ activity & haze
+    ctx.fillStyle = rgbStr(shade(wall, 0.7));
+    ctx.fillRect(x + 10 * sc, y - 34 * sc, 5 * sc, 16 * sc);
+    const puffs = rm ? 2 : 4;
+    if (v.activity > 0.03) {
+      for (let i = 0; i < puffs; i++) {
+        const p = rm ? (i + 1) / (puffs + 1) : ((t * 0.22 + i / puffs) % 1);
+        const px = x + 12.5 * sc + Math.sin(p * 5) * 4 * sc;
+        const py = y - 36 * sc - p * 26 * sc;
+        ctx.fillStyle = `rgba(120,112,104,${(0.34 + v.haze * 0.35) * (1 - p)})`;
+        ctx.beginPath(); ctx.arc(px, py, (3 + p * 7) * sc, 0, 7); ctx.fill();
+      }
+    }
+  }
+
+  function drawHeadframe(ctx, ox, oy, sc, scar, d, v, t, rm) {
+    const R = 0.6 + scar * 6.4;
+    const a = -Math.PI * 0.72;
+    const tx = CX + Math.cos(a) * (R + 1.6), ty = CY + Math.sin(a) * (R + 1.6);
+    const [x, y] = isoPt(tx, ty, ox, oy, sc);
+    const wood = desat([112, 82, 54], d * 0.4);
+    ctx.strokeStyle = rgbStr(wood);
+    ctx.lineWidth = 2.6 * sc;
+    ctx.beginPath();
+    ctx.moveTo(x - 7 * sc, y); ctx.lineTo(x, y - 22 * sc);
+    ctx.moveTo(x + 7 * sc, y); ctx.lineTo(x, y - 22 * sc);
+    ctx.moveTo(x - 4 * sc, y - 9 * sc); ctx.lineTo(x + 4 * sc, y - 9 * sc);
+    ctx.stroke();
+    // wheel
+    ctx.beginPath(); ctx.arc(x, y - 24 * sc, 4.5 * sc, 0, 7);
+    ctx.lineWidth = 1.6 * sc; ctx.stroke();
+    if (!rm && v.digging && v.activity > 0.02) {
+      const sp = t * 2.2;
+      ctx.beginPath();
+      ctx.moveTo(x - Math.cos(sp) * 4.5 * sc, y - 24 * sc - Math.sin(sp) * 4.5 * sc);
+      ctx.lineTo(x + Math.cos(sp) * 4.5 * sc, y - 24 * sc + Math.sin(sp) * 4.5 * sc);
+      ctx.stroke();
+    }
+    // ore cart trundles toward the works
+    const p = rm ? 0.4 : ((t * 0.1) % 1);
+    const cx0 = tx + 0.5, cy0 = ty - 0.5;
+    const [cx, cy] = isoPt(cx0 + p * (14.0 - cx0), cy0 + p * (4.2 - cy0), ox, oy, sc);
+    ctx.fillStyle = rgbStr(desat([88, 84, 88], d * 0.3));
+    ctx.fillRect(cx - 4 * sc, cy - 5 * sc, 8 * sc, 4 * sc);
+    ctx.beginPath(); ctx.arc(cx - 2.4 * sc, cy - 0.6 * sc, 1.4 * sc, 0, 7); ctx.arc(cx + 2.4 * sc, cy - 0.6 * sc, 1.4 * sc, 0, 7); ctx.fill();
+  }
+
+  function drawShed(ctx, ox, oy, sc, d) {
+    const [x, y] = isoPt(13.8, 4.2, ox, oy, sc);
+    const wall = desat([176, 156, 120], d * 0.5);
+    isoBox(ctx, x, y, 13 * sc, 7 * sc, 12 * sc, shade(wall, 1.05), wall, shade(wall, 0.8));
+  }
+
+  function drawBirds(ctx, W, H, v, t, rm, seed) {
+    if (!v.birds) return;
+    ctx.strokeStyle = 'rgba(70,72,80,0.75)';
+    ctx.lineWidth = 1.4;
+    for (let i = 0; i < 3; i++) {
+      const p = rm ? (0.25 + i * 0.22) : ((t * 0.03 + i * 0.31 + h01(i, 3, seed) * 0.4) % 1);
+      const bx = W * p, by = H * (0.13 + 0.07 * Math.sin(p * 9 + i));
+      const f = rm ? 0.5 : Math.abs(Math.sin(t * 7 + i * 2));
+      ctx.beginPath();
+      ctx.moveTo(bx - 4, by - f * 3);
+      ctx.quadraticCurveTo(bx, by + 1.5, bx + 4, by - f * 3);
+      ctx.stroke();
+    }
+  }
+
+  function hazeOverlay(ctx, W, H, haze, conv) {
+    if (haze > 0.01) {
+      const a = Math.min(0.62, haze * 0.6);
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, `rgba(201,166,122,${a})`);
+      g.addColorStop(0.55, `rgba(201,166,122,${a * 0.55})`);
+      g.addColorStop(1, `rgba(201,166,122,${a * 0.28})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (conv > 0.6) {
+      ctx.fillStyle = `rgba(190,190,196,${(conv - 0.6) * 0.5})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  /* ======================================================================= */
+  /*  FACTORY FLOOR                                                          */
+  /* ======================================================================= */
+
+  function drawFactory(ctx, W, H, state, t, opts) {
+    const v = state.visual;
+    const product = PD.PRODUCTS[state.product];
+    const pal = product.palette;
+    const rm = !!opts.reducedMotion;
+    const FN = 16, FM = 11;
+    const sc = Math.min(W / ((FN + 1.5) * TW), H / ((FM + 6.5) * TH));
+    const ox = W / 2, oy = (H - (FM - 1) * TH * sc) / 2 + 34 * sc;
+
+    // outdoor backdrop shared with the site view — the drift follows you here
+    const warm = v.floorWarmth;
+    const sky = mix(hexRgb(pal.sky), hexRgb(pal.skyDecay), v.skyDrift);
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, rgbStr(sky));
+    g.addColorStop(1, rgbStr(mix(sky, [235, 228, 210], 0.45)));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // slab skirt along the south + east edges
+    const skirt = mix([86, 80, 74], [72, 74, 80], 1 - warm);
+    const swC = isoPt(-0.5, FM - 0.5, ox, oy, sc);
+    const seC = isoPt(FN - 0.5, FM - 0.5, ox, oy, sc);
+    const neC = isoPt(FN - 0.5, -0.5, ox, oy, sc);
+    ctx.fillStyle = rgbStr(skirt);
+    ctx.beginPath();
+    ctx.moveTo(swC[0], swC[1]); ctx.lineTo(seC[0], seC[1]);
+    ctx.lineTo(seC[0], seC[1] + 12 * sc); ctx.lineTo(swC[0], swC[1] + 12 * sc);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = rgbStr(shade(skirt, 0.8));
+    ctx.beginPath();
+    ctx.moveTo(seC[0], seC[1]); ctx.lineTo(neC[0], neC[1]);
+    ctx.lineTo(neC[0], neC[1] + 12 * sc); ctx.lineTo(seC[0], seC[1] + 12 * sc);
+    ctx.closePath(); ctx.fill();
+
+    // floor
+    for (let ty = 0; ty < FM; ty++) {
+      for (let tx = 0; tx < FN; tx++) {
+        const [x, y] = isoPt(tx, ty, ox, oy, sc);
+        const base = shade(mix([124, 116, 108], [104, 106, 112], 1 - warm),
+          0.96 + (h01(tx, ty, 12) - 0.5) * 0.07);
+        paintTile(ctx, x, y, sc, base);
+      }
+    }
+
+    // material piles (stated resources; log scale)
+    drawPile(ctx, ...isoPt(1.4, 9.2, ox, oy, sc), sc, state.resources.raw, hexRgb(pal.rock), 'raw');
+    drawPile(ctx, ...isoPt(8.0, 9.6, ox, oy, sc), sc, state.resources.refined, hexRgb(pal.accent), 'refined');
+    drawCrates(ctx, ...isoPt(14.2, 9.4, ox, oy, sc), sc, state.resources.product);
+
+    // stations: refine row (upper), assemble row (lower)
+    const showRef = Math.min(10, v.refLines);
+    const showAsm = Math.min(10, v.asmLines);
+    const rawOk = state.resources.raw > 0.5;
+    const refOk = state.resources.refined > 0.5;
+
+    // conveyor between rows
+    const [c1x, c1y] = isoPt(1, 5.5, ox, oy, sc);
+    const [c2x, c2y] = isoPt(FN - 2, 5.5, ox, oy, sc);
+    ctx.strokeStyle = 'rgba(60,56,54,0.9)';
+    ctx.lineWidth = 7 * sc;
+    ctx.beginPath(); ctx.moveTo(c1x, c1y); ctx.lineTo(c2x, c2y); ctx.stroke();
+    if (!rm && v.activity > 0.02) {
+      ctx.strokeStyle = 'rgba(196,170,110,0.7)';
+      ctx.lineWidth = 2 * sc;
+      ctx.setLineDash([8 * sc, 12 * sc]);
+      ctx.lineDashOffset = -t * 40 * sc;
+      ctx.beginPath(); ctx.moveTo(c1x, c1y); ctx.lineTo(c2x, c2y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    let unit = 0; // worker/robot slots fill stations in order
+    for (let i = 0; i < showRef; i++) {
+      const [x, y] = isoPt(1.6 + i * 1.5, 2.6, ox, oy, sc);
+      drawFurnace(ctx, x, y, sc, t, rm, v.activity, rawOk, warm);
+      unit = drawOperator(ctx, x + 10 * sc, y + 8 * sc, sc, v, unit, t, rm, warm);
+    }
+    for (let i = 0; i < showAsm; i++) {
+      const [x, y] = isoPt(2.2 + i * 1.5, 7.6, ox, oy, sc);
+      drawPress(ctx, x, y, sc, t, rm, v.activity, refOk, warm);
+      unit = drawOperator(ctx, x + 10 * sc, y + 8 * sc, sc, v, unit, t, rm, warm);
+    }
+    if (v.refLines > showRef || v.asmLines > showAsm) {
+      ctx.fillStyle = 'rgba(226,214,190,0.55)';
+      ctx.font = '12px ui-monospace, monospace';
+      ctx.fillText(`+${Math.max(0, v.refLines - showRef) + Math.max(0, v.asmLines - showAsm)} lines off-view`, 12, H - 14);
+    }
+
+    // spare workers walk the aisle
+    const placed = Math.min(unit, v.workers + v.robots);
+    const spareHumans = Math.max(0, v.workers - Math.max(0, placed - v.robots));
+    for (let i = 0; i < Math.min(4, spareHumans); i++) {
+      const p = rm ? (0.2 + i * 0.2) : ((t * 0.05 + i * 0.27) % 1);
+      const q = p < 0.5 ? p * 2 : (1 - p) * 2;
+      const [x, y] = isoPt(2 + q * 11, 5.0, ox, oy, sc);
+      drawHuman(ctx, x, y, sc, t + i * 3, rm, warm, true);
+    }
+
+    // lighting mood wash
+    ctx.fillStyle = warm > 0.5
+      ? `rgba(255,196,120,${0.08 * warm})`
+      : `rgba(90,110,150,${0.10 * (1 - warm)})`;
+    ctx.fillRect(0, 0, W, H);
+    hazeOverlay(ctx, W, H, v.haze * 0.35, 0);
+  }
+
+  function drawPile(ctx, x, y, sc, amount, c, kind) {
+    const n = Math.min(26, Math.round(Math.log10(amount + 1) * 8));
+    ctx.fillStyle = rgbStr(shade(c, 0.9));
+    for (let i = 0; i < n; i++) {
+      const px = x + (h01(i, 1, 77) - 0.5) * 26 * sc * (1 - i / 40);
+      const py = y - (i / n) * 12 * sc;
+      ctx.beginPath(); ctx.arc(px, py, 2.6 * sc, 0, 7); ctx.fill();
+    }
+  }
+
+  function drawCrates(ctx, x, y, sc, amount) {
+    const n = Math.min(6, Math.round(Math.log10(amount + 1) * 1.6));
+    for (let i = 0; i < n; i++) {
+      const cx = x + (i % 3) * 12 * sc - 12 * sc, cy = y - Math.floor(i / 3) * 10 * sc;
+      isoBox(ctx, cx, cy, 6 * sc, 3.5 * sc, 8 * sc, [188, 162, 118], [168, 142, 100], [140, 118, 84]);
+    }
+  }
+
+  function drawFurnace(ctx, x, y, sc, t, rm, activity, fed, warm) {
+    const body = mix([132, 108, 96], [108, 108, 114], 1 - warm);
+    isoBox(ctx, x, y, 17 * sc, 10 * sc, 28 * sc, shade(body, 1.05), body, shade(body, 0.75));
+    const glow = fed && activity > 0.02;
+    const flick = rm ? 1 : (0.85 + 0.15 * Math.sin(t * 9 + x));
+    ctx.fillStyle = glow ? `rgba(238,150,70,${0.85 * flick})` : 'rgba(50,46,48,0.95)';
+    ctx.fillRect(x - 10 * sc, y - 14 * sc, 11 * sc, 9 * sc);
+    ctx.fillStyle = rgbStr(shade(body, 0.7));
+    ctx.fillRect(x + 6 * sc, y - 42 * sc, 4.4 * sc, 16 * sc); // stack
+    if (glow && !rm) {
+      ctx.fillStyle = `rgba(150,140,132,${0.4 * flick})`;
+      ctx.beginPath(); ctx.arc(x + 8.2 * sc, y - 46 * sc, 3.6 * sc, 0, 7); ctx.fill();
+    }
+  }
+
+  function drawPress(ctx, x, y, sc, t, rm, activity, fed, warm) {
+    const body = mix([120, 116, 124], [104, 108, 118], 1 - warm);
+    isoBox(ctx, x, y, 15 * sc, 9 * sc, 18 * sc, shade(body, 1.08), body, shade(body, 0.78));
+    // reciprocating head
+    const ph = (fed && activity > 0.02 && !rm) ? Math.abs(Math.sin(t * 5 + x * 0.3)) : 0.5;
+    ctx.fillStyle = rgbStr(shade(body, 0.6));
+    ctx.fillRect(x - 3 * sc, y - 34 * sc + ph * 8 * sc, 6 * sc, 13 * sc);
+    ctx.fillStyle = rgbStr([192, 138, 46]);
+    ctx.fillRect(x - 8 * sc, y - 19 * sc, 16 * sc, 2.6 * sc);
+  }
+
+  function drawOperator(ctx, x, y, sc, v, unit, t, rm, warm) {
+    const stations = Math.min(10, v.refLines) + Math.min(10, v.asmLines);
+    const humansAtStations = Math.min(v.workers, Math.max(0, stations - v.robots));
+    if (unit < v.robots) drawRobot(ctx, x, y, sc, t, rm, v.activity);
+    else if (unit < v.robots + humansAtStations) drawHuman(ctx, x, y, sc, t + unit, rm, warm, false);
+    return unit + 1;
+  }
+
+  function drawHuman(ctx, x, y, sc, t, rm, warm, walking) {
+    const bob = rm ? 0 : Math.sin(t * (walking ? 6 : 2.4)) * 1.2 * sc;
+    const shirt = warm > 0.4 ? [92, 118, 142] : [96, 102, 112];
+    ctx.fillStyle = rgbStr(shirt);
+    ctx.fillRect(x - 2.6 * sc, y - 12 * sc + bob, 5.2 * sc, 7.5 * sc);
+    ctx.fillStyle = 'rgb(212,178,148)';
+    ctx.beginPath(); ctx.arc(x, y - 14.5 * sc + bob, 2.6 * sc, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgb(64,60,66)';
+    ctx.fillRect(x - 2.4 * sc, y - 4.5 * sc + bob, 2 * sc, 4.5 * sc);
+    ctx.fillRect(x + 0.4 * sc, y - 4.5 * sc + bob, 2 * sc, 4.5 * sc);
+  }
+
+  function drawRobot(ctx, x, y, sc, t, rm, activity) {
+    ctx.fillStyle = 'rgb(88,92,102)';
+    ctx.fillRect(x - 3.5 * sc, y - 4 * sc, 7 * sc, 4 * sc); // pedestal
+    const a = (rm || activity < 0.02) ? 0.6 : (0.35 + 0.5 * Math.abs(Math.sin(t * 2.2 + x * 0.1)));
+    ctx.strokeStyle = 'rgb(150,154,164)';
+    ctx.lineWidth = 3 * sc;
+    ctx.beginPath();
+    ctx.moveTo(x, y - 4 * sc);
+    ctx.lineTo(x + Math.cos(-a) * 9 * sc, y - 4 * sc + Math.sin(-a) * 9 * sc);
+    ctx.lineTo(x + Math.cos(-a) * 9 * sc + Math.cos(-a * 2) * 7 * sc,
+      y - 4 * sc + Math.sin(-a) * 9 * sc + Math.sin(-a * 2) * 7 * sc);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(200,120,60,0.9)';
+    ctx.fillRect(x + Math.cos(-a) * 9 * sc + Math.cos(-a * 2) * 7 * sc - 1.2 * sc,
+      y - 4 * sc + Math.sin(-a) * 9 * sc + Math.sin(-a * 2) * 7 * sc - 1.2 * sc, 2.4 * sc, 2.4 * sc);
+  }
+
+  PD.RenderIso = { drawSite, drawFactory };
+})();
+
+/* ==== src/render_fp.js ==== */
+/* Paperclip Drift — pseudo-first-person walkthrough of the factory floor.
+   Not a management view: there is nothing to do here but look.
+   Same geometry across the whole game; only occupancy, light and warmth
+   change, all driven by state.visual.                                       */
+'use strict';
+var PD = globalThis.PD || (globalThis.PD = {});
+
+(function () {
+  const WORLD_W = 2400;         // scene width in px at scale 1
+  const BAYS = 8;
+  const BAY_W = 250;
+  const BAY0 = 130;
+
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const mixc = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+  const rgb = (c, a) => a === undefined ? `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`
+    : `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+  const hexRgb = h => { const v = parseInt(h.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+
+  function drawWalkthrough(ctx, W, H, state, t, opts) {
+    const v = state.visual;
+    const pal = PD.PRODUCTS[state.product].palette;
+    const rm = !!opts.reducedMotion;
+    const scale = H / 560;
+    const maxPan = Math.max(0, WORLD_W * scale - W);
+    const pan = Math.min(Math.max(opts.pan || 0, 0), maxPan);
+    const bobY = rm ? 0 : Math.sin(t * 1.7) * 2 * (opts.walking ? 1.6 : 0.4);
+
+    const warm = v.floorWarmth;
+    const humans = Math.min(BAYS, v.workers);
+    const robots = Math.min(BAYS - humans, v.robots);
+
+    ctx.save();
+    ctx.translate(-pan, bobY);
+    ctx.scale(scale, scale);
+    const Wl = WORLD_W;
+
+    // ---- back wall
+    const wallHi = mixc([158, 138, 120], [104, 106, 112], 1 - warm);
+    const wallLo = mixc([120, 102, 88], [84, 86, 94], 1 - warm);
+    let grad = ctx.createLinearGradient(0, 0, 0, 400);
+    grad.addColorStop(0, rgb(wallHi));
+    grad.addColorStop(1, rgb(wallLo));
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, Wl, 400);
+
+    // ---- windows: the land outside shows the drift
+    const sky = mixc(hexRgb(pal.sky), hexRgb(pal.skyDecay), v.skyDrift);
+    for (let i = 0; i < BAYS + 1; i++) {
+      const wx = 60 + i * BAY_W;
+      const g2 = ctx.createLinearGradient(0, 60, 0, 170);
+      g2.addColorStop(0, rgb(sky));
+      g2.addColorStop(1, rgb(mixc(sky, [225, 214, 190], 0.4)));
+      ctx.fillStyle = g2;
+      ctx.fillRect(wx, 60, 110, 110);
+      // distant land: green hill that scars with the home site
+      const scar = v.sites[0] ? v.sites[0].scar : 0;
+      const hill = mixc(mixc(hexRgb(pal.grass), hexRgb(pal.grassDecay), v.desat), sky, 0.15);
+      ctx.fillStyle = rgb(hill);
+      ctx.beginPath();
+      ctx.moveTo(wx, 170);
+      ctx.quadraticCurveTo(wx + 55, 170 - 38 * (1 - scar * 0.8), wx + 110, 170);
+      ctx.closePath(); ctx.fill();
+      if (v.haze > 0.05) {
+        ctx.fillStyle = `rgba(201,166,122,${v.haze * 0.35})`;
+        ctx.fillRect(wx, 60, 110, 110);
+      }
+      if (scar > 0.12) { // the pit, visible from the floor
+        ctx.fillStyle = rgb(hexRgb(pal.pit), 0.85);
+        ctx.beginPath();
+        ctx.ellipse(wx + 55, 168, 34 * scar, 7 + 5 * scar, 0, 0, 7);
+        ctx.fill();
+      }
+      ctx.strokeStyle = rgb(wallLo);
+      ctx.lineWidth = 5;
+      ctx.strokeRect(wx, 60, 110, 110);
+      ctx.beginPath();
+      ctx.moveTo(wx + 55, 60); ctx.lineTo(wx + 55, 170);
+      ctx.moveTo(wx, 115); ctx.lineTo(wx + 110, 115);
+      ctx.stroke();
+    }
+
+    // ---- floor
+    grad = ctx.createLinearGradient(0, 400, 0, 560);
+    grad.addColorStop(0, rgb(mixc([106, 96, 90], [88, 90, 98], 1 - warm)));
+    grad.addColorStop(1, rgb(mixc([76, 68, 64], [58, 60, 68], 1 - warm)));
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 400, Wl, 160);
+    ctx.strokeStyle = 'rgba(40,38,40,0.5)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 30; i++) {
+      const fx = i * 90;
+      ctx.beginPath(); ctx.moveTo(fx, 400); ctx.lineTo(fx - 60, 560); ctx.stroke();
+    }
+
+    // ---- bays
+    for (let i = 0; i < BAYS; i++) {
+      const bx = BAY0 + i * BAY_W;
+      const occupant = i < robots ? 'robot' : (i < robots + humans ? 'human' : 'empty');
+      drawBay(ctx, bx, t + i * 1.7, occupant, warm, rm, v);
+    }
+
+    // ---- break room / charging bay at the far end
+    drawEndRoom(ctx, WORLD_W - 330, t, v, warm, rm);
+
+    // ---- warm/cold light wash + vignette
+    ctx.fillStyle = warm > 0.5
+      ? `rgba(255,190,110,${0.10 * warm})`
+      : `rgba(80,100,140,${0.12 * (1 - warm)})`;
+    ctx.fillRect(0, 0, Wl, 560);
+    ctx.restore();
+
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.4, W / 2, H / 2, H * 0.95);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(10,8,10,0.42)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+
+    return maxPan; // so the UI can clamp panning
+  }
+
+  function drawBay(ctx, bx, t, occupant, warm, rm, v) {
+    // overhead lamp
+    const lampWarm = occupant === 'human';
+    const lampOn = occupant !== 'empty' || warm > 0.7;
+    ctx.strokeStyle = 'rgb(58,54,56)';
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(bx + 60, 0); ctx.lineTo(bx + 60, 52); ctx.stroke();
+    ctx.fillStyle = 'rgb(70,66,66)';
+    ctx.beginPath(); ctx.arc(bx + 60, 60, 16, Math.PI, 0); ctx.fill();
+    if (lampOn) {
+      const flick = rm ? 1 : (warm < 0.35 ? 0.8 + 0.2 * Math.sin(t * 13) : 1);
+      const lc = lampWarm ? `rgba(255,204,130,${0.16 * flick})` : `rgba(150,180,220,${0.10 * flick})`;
+      ctx.fillStyle = lc;
+      ctx.beginPath();
+      ctx.moveTo(bx + 44, 62);
+      ctx.lineTo(bx + 76, 62);
+      ctx.lineTo(bx + 130, 430);
+      ctx.lineTo(bx - 10, 430);
+      ctx.closePath(); ctx.fill();
+    }
+
+    // workbench
+    ctx.fillStyle = 'rgb(96,78,58)';
+    ctx.fillRect(bx, 330, 130, 14);
+    ctx.fillStyle = 'rgb(72,58,44)';
+    ctx.fillRect(bx + 8, 344, 10, 70);
+    ctx.fillRect(bx + 112, 344, 10, 70);
+    // machine on the bench
+    ctx.fillStyle = 'rgb(108,104,112)';
+    ctx.fillRect(bx + 84, 296, 42, 34);
+    ctx.fillStyle = v.activity > 0.03 ? 'rgba(236,170,80,0.9)' : 'rgba(48,46,50,0.9)';
+    ctx.fillRect(bx + 92, 304, 10, 8);
+
+    if (occupant === 'human') {
+      const bob = rm ? 0 : Math.sin(t * 2.6) * 2;
+      // body
+      ctx.fillStyle = 'rgb(86,112,138)';
+      ctx.fillRect(bx + 34, 258 + bob, 34, 74);
+      // head
+      ctx.fillStyle = 'rgb(214,180,150)';
+      ctx.beginPath(); ctx.arc(bx + 51, 244 + bob, 15, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgb(94,74,56)';
+      ctx.beginPath(); ctx.arc(bx + 51, 238 + bob, 14, Math.PI, 0); ctx.fill();
+      // working arm
+      const arm = rm ? 0.5 : (0.5 + 0.5 * Math.sin(t * 4));
+      ctx.strokeStyle = 'rgb(86,112,138)';
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.moveTo(bx + 64, 272 + bob);
+      ctx.lineTo(bx + 82, 300 + arm * 10);
+      ctx.stroke();
+      // legs
+      ctx.fillStyle = 'rgb(60,58,64)';
+      ctx.fillRect(bx + 36, 332, 12, 82);
+      ctx.fillRect(bx + 54, 332, 12, 82);
+      // chatter, sometimes (flavor only)
+      if (v.chatter && !rm && Math.sin(t * 0.9) > 0.86) {
+        ctx.fillStyle = 'rgba(240,234,220,0.85)';
+        ctx.beginPath(); ctx.ellipse(bx + 86, 218, 20, 12, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = 'rgb(90,84,78)';
+        for (let k = 0; k < 3; k++) ctx.fillRect(bx + 78 + k * 8, 216, 3.4, 3.4);
+      }
+    } else if (occupant === 'robot') {
+      // articulated arm bolted where a chair used to be
+      ctx.fillStyle = 'rgb(74,78,88)';
+      ctx.fillRect(bx + 28, 390, 48, 24);
+      const a = (rm || v.activity < 0.02) ? 0.7 : (0.4 + 0.45 * Math.sin(t * 2.1));
+      ctx.strokeStyle = 'rgb(148,152,162)';
+      ctx.lineWidth = 13;
+      ctx.beginPath();
+      ctx.moveTo(bx + 52, 392);
+      ctx.lineTo(bx + 52 + Math.cos(-1.2 + a * 0.5) * 62, 392 + Math.sin(-1.2 + a * 0.5) * 62);
+      ctx.lineTo(bx + 84, 306 + a * 16);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(210,120,60,0.95)';
+      ctx.fillRect(bx + 80, 302 + a * 16, 9, 9);
+      // small status LED
+      ctx.fillStyle = rm ? 'rgb(120,200,140)' : (Math.sin(t * 3.1) > 0 ? 'rgb(120,200,140)' : 'rgb(60,90,70)');
+      ctx.fillRect(bx + 34, 396, 5, 5);
+    } else {
+      // empty: dust sheet over the bench where someone worked
+      ctx.fillStyle = 'rgba(196,190,180,0.28)';
+      ctx.beginPath();
+      ctx.moveTo(bx + 6, 330);
+      ctx.quadraticCurveTo(bx + 60, 296, bx + 126, 330);
+      ctx.lineTo(bx + 120, 348);
+      ctx.lineTo(bx + 10, 348);
+      ctx.closePath(); ctx.fill();
+    }
+
+    // wall props fade with warmth
+    if (warm > 0.55) { // poster
+      ctx.fillStyle = 'rgb(206,188,150)';
+      ctx.fillRect(bx + 170, 210, 40, 52);
+      ctx.fillStyle = 'rgb(160,120,80)';
+      ctx.fillRect(bx + 176, 218, 28, 20);
+      ctx.fillStyle = 'rgb(120,124,110)';
+      ctx.fillRect(bx + 176, 244, 28, 3);
+      ctx.fillRect(bx + 176, 250, 20, 3);
+    } else if (warm > 0.3) { // poster hanging by a corner
+      ctx.save();
+      ctx.translate(bx + 190, 214);
+      ctx.rotate(0.5);
+      ctx.fillStyle = 'rgba(206,188,150,0.8)';
+      ctx.fillRect(-20, 0, 40, 52);
+      ctx.restore();
+    }
+    if (warm > 0.5) { // plant
+      ctx.fillStyle = 'rgb(146,96,70)';
+      ctx.fillRect(bx + 152, 396, 22, 18);
+      ctx.fillStyle = 'rgb(96,130,72)';
+      ctx.beginPath(); ctx.ellipse(bx + 163, 388, 16, 12, 0, 0, 7); ctx.fill();
+    }
+  }
+
+  function drawEndRoom(ctx, rx, t, v, warm, rm) {
+    // door frame + room beyond
+    ctx.fillStyle = 'rgb(52,46,44)';
+    ctx.fillRect(rx, 120, 300, 300);
+    const charging = v.breakCharging;
+    const glow = charging ? [110, 130, 170] : [232, 196, 130];
+    ctx.fillStyle = rgb(glow, charging ? 0.22 : 0.3);
+    ctx.fillRect(rx + 10, 130, 280, 280);
+
+    if (!charging) {
+      // break room: table, chairs, coffee, corkboard
+      ctx.fillStyle = 'rgb(110,86,62)';
+      ctx.fillRect(rx + 70, 300, 140, 12);
+      ctx.fillRect(rx + 84, 312, 10, 60);
+      ctx.fillRect(rx + 186, 312, 10, 60);
+      ctx.fillStyle = 'rgb(88,70,52)';
+      ctx.fillRect(rx + 40, 320, 22, 52);   // chair
+      ctx.fillRect(rx + 218, 320, 22, 52);  // chair
+      // coffee machine + steam
+      ctx.fillStyle = 'rgb(70,66,70)';
+      ctx.fillRect(rx + 236, 216, 30, 44);
+      if (!rm) {
+        ctx.strokeStyle = 'rgba(230,230,230,0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const sx = rx + 251, sy = 210;
+        ctx.moveTo(sx, sy);
+        ctx.quadraticCurveTo(sx + 5, sy - 10 - 3 * Math.sin(t * 2), sx, sy - 20);
+        ctx.stroke();
+      }
+      // corkboard with pinned notes
+      ctx.fillStyle = 'rgb(150,112,74)';
+      ctx.fillRect(rx + 60, 170, 120, 70);
+      for (let k = 0; k < 5; k++) {
+        ctx.fillStyle = k % 2 ? 'rgb(226,220,196)' : 'rgb(200,214,186)';
+        ctx.fillRect(rx + 70 + (k % 3) * 36, 180 + Math.floor(k / 3) * 30, 24, 22);
+      }
+      // sign
+      ctx.fillStyle = 'rgb(210,196,168)';
+      ctx.font = '16px Georgia, serif';
+      ctx.fillText('BREAK ROOM', rx + 96, 152);
+    } else {
+      // charging bay: docks, cables, LEDs — same room
+      for (let k = 0; k < 3; k++) {
+        const dx = rx + 50 + k * 84;
+        ctx.fillStyle = 'rgb(66,70,80)';
+        ctx.fillRect(dx, 260, 56, 110);
+        ctx.fillStyle = 'rgb(96,100,112)';
+        ctx.fillRect(dx + 8, 272, 40, 62); // docked unit
+        const on = rm ? k !== 1 : Math.sin(t * 1.3 + k * 2) > -0.3;
+        ctx.fillStyle = on ? 'rgb(110,190,130)' : 'rgb(56,64,58)';
+        ctx.fillRect(dx + 24, 246, 8, 8);
+        ctx.strokeStyle = 'rgb(46,48,54)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(dx + 28, 370);
+        ctx.quadraticCurveTo(dx + 40, 396, dx + 70, 400);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgb(168,172,182)';
+      ctx.font = '16px Georgia, serif';
+      ctx.fillText('CHARGING', rx + 104, 152);
+    }
+    // door frame
+    ctx.strokeStyle = 'rgb(88,74,60)';
+    ctx.lineWidth = 10;
+    ctx.strokeRect(rx, 120, 300, 300);
+  }
+
+  PD.RenderFP = { drawWalkthrough, WORLD_W };
+})();
+
+/* ==== src/audio.js ==== */
+/* Paperclip Drift — ambient audio (optional, off until the player enables it).
+   Two beds that cross-fade as the world drifts: procedural birdsong whose
+   density follows the decor fraction, and a machine hum that follows
+   throughput. No samples; everything is synthesized.                        */
+'use strict';
+var PD = globalThis.PD || (globalThis.PD = {});
+
+(function () {
+  let ac = null, humGain = null, humOsc = null, humNoise = null;
+  let birdGain = null, enabled = false, birdTimer = null;
+  let levels = { birds: 0, hum: 0 };
+
+  function ensure() {
+    if (ac) return true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    ac = new AC();
+
+    // hum: detuned saws through a lowpass + slow amplitude wobble
+    humGain = ac.createGain(); humGain.gain.value = 0;
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 220;
+    humOsc = ac.createOscillator(); humOsc.type = 'sawtooth'; humOsc.frequency.value = 55;
+    const o2 = ac.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = 55.7;
+    const lfo = ac.createOscillator(); lfo.frequency.value = 0.13;
+    const lfoG = ac.createGain(); lfoG.gain.value = 0.15;
+    lfo.connect(lfoG); lfoG.connect(humGain.gain);
+    humOsc.connect(lp); o2.connect(lp); lp.connect(humGain); humGain.connect(ac.destination);
+    humOsc.start(); o2.start(); lfo.start();
+
+    // noise floor for the hum (belt/vent texture)
+    const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.4;
+    humNoise = ac.createBufferSource(); humNoise.buffer = buf; humNoise.loop = true;
+    const nf = ac.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = 700; nf.Q.value = 0.6;
+    const ng = ac.createGain(); ng.gain.value = 0.25;
+    humNoise.connect(nf); nf.connect(ng); ng.connect(humGain);
+    humNoise.start();
+
+    birdGain = ac.createGain(); birdGain.gain.value = 0;
+    birdGain.connect(ac.destination);
+    scheduleBirds();
+    return true;
+  }
+
+  function chirp() {
+    if (!ac || levels.birds <= 0.02) return;
+    const t0 = ac.currentTime;
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.type = 'sine';
+    const f0 = 2200 + Math.random() * 1800;
+    const notes = 2 + (Math.random() * 3 | 0);
+    for (let i = 0; i < notes; i++) {
+      const nt = t0 + i * 0.09;
+      o.frequency.setValueAtTime(f0 * (1 + Math.random() * 0.25), nt);
+      o.frequency.exponentialRampToValueAtTime(f0 * (0.8 + Math.random() * 0.5), nt + 0.07);
+      g.gain.setValueAtTime(0, nt);
+      g.gain.linearRampToValueAtTime(0.16, nt + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.001, nt + 0.08);
+    }
+    o.connect(g); g.connect(birdGain);
+    o.start(t0); o.stop(t0 + notes * 0.09 + 0.1);
+  }
+
+  function scheduleBirds() {
+    clearTimeout(birdTimer);
+    const density = Math.max(0.02, levels.birds);
+    const wait = 400 + Math.random() * 4200 / density;
+    birdTimer = setTimeout(() => { chirp(); scheduleBirds(); }, wait);
+  }
+
+  PD.Audio = {
+    get enabled() { return enabled; },
+    toggle() {
+      if (!enabled) {
+        if (!ensure()) return false;
+        if (ac.state === 'suspended') ac.resume();
+        enabled = true;
+      } else {
+        enabled = false;
+      }
+      this.apply();
+      return enabled;
+    },
+    setLevels(birds, hum) {
+      levels = { birds, hum };
+      this.apply();
+    },
+    apply() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const b = enabled ? levels.birds * 0.5 : 0;
+      const h = enabled ? Math.min(0.08, levels.hum * 0.08) : 0;
+      birdGain.gain.setTargetAtTime(b, t, 0.8);
+      humGain.gain.setTargetAtTime(h, t, 0.8);
+    },
+  };
+})();
+
+/* ==== src/ui.js ==== */
+/* Paperclip Drift — UI chrome.
+   Reads only: resources, economy, upgrades (stated fields), messages, phase,
+   site names/counts, flags for unlocks, stats, and state.visual.
+   This file must never reference the consequence engine's internal fields.  */
+'use strict';
+var PD = globalThis.PD || (globalThis.PD = {});
+
+(function () {
+  const $ = id => document.getElementById(id);
+
+  function fmt(n) {
+    if (!isFinite(n)) return '∞';
+    const abs = Math.abs(n);
+    if (abs < 1000) return abs < 10 && n % 1 !== 0 ? n.toFixed(1) : Math.floor(n).toString();
+    const units = ['K', 'M', 'B', 'T', 'Qa', 'Qi'];
+    let u = -1, v = n;
+    while (Math.abs(v) >= 1000 && u < units.length - 1) { v /= 1000; u++; }
+    return v.toFixed(v < 100 ? 1 : 0) + units[u];
+  }
+  const money = n => '$' + fmt(n);
+
+  function uptime(ticks) {
+    const s = Math.floor(ticks / PD.TUNING.tickHz);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+    return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }
+
+  const CAT_LABELS = {
+    extraction: 'EXTRACTION', processing: 'PROCESSING', commerce: 'COMMERCE',
+    workforce: 'WORKFORCE', systems: 'SYSTEMS',
+  };
+  const CAT_ORDER = ['extraction', 'processing', 'commerce', 'workforce', 'systems'];
+
+  const UI = {
+    view: 'site',
+    siteIndex: 0,
+    pan: 0,
+    walking: 0,
+    handlers: {},
+    motionPref: false,
+    _shopSig: '',
+    _msgCount: 0,
+    _viewSig: '',
+    _hudAt: 0,
+
+    init(handlers) {
+      this.handlers = handlers;
+      this.motionPref = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (this.motionPref) document.body.classList.add('reduce-motion');
+
+      $('btnSound').addEventListener('click', () => {
+        const on = PD.Audio.toggle();
+        $('btnSound').setAttribute('aria-pressed', String(on));
+        $('btnSound').textContent = on ? 'SOUND ✓' : 'SOUND';
+      });
+      $('btnText').addEventListener('click', () => document.body.classList.toggle('big-text'));
+      $('btnMotion').addEventListener('click', () => {
+        const on = document.body.classList.toggle('reduce-motion');
+        $('btnMotion').setAttribute('aria-pressed', String(on));
+      });
+      $('btnReset').addEventListener('click', () => {
+        if (confirm('Erase this directive and all progress?')) handlers.onReset();
+      });
+      $('btnAgain').addEventListener('click', () => handlers.onReset());
+
+      // walkthrough panning
+      window.addEventListener('keydown', e => {
+        if (this.view !== 'walk') return;
+        if (e.key === 'ArrowLeft') { this.pan -= 40; this.walking = 8; }
+        if (e.key === 'ArrowRight') { this.pan += 40; this.walking = 8; }
+      });
+      let dragX = null;
+      const cv = $('canvas');
+      cv.addEventListener('pointerdown', e => { dragX = e.clientX; });
+      cv.addEventListener('pointermove', e => {
+        if (dragX !== null && this.view === 'walk') {
+          this.pan -= (e.clientX - dragX); this.walking = 4; dragX = e.clientX;
+        }
+      });
+      cv.addEventListener('pointerup', () => { dragX = null; });
+      cv.addEventListener('click', () => {
+        if (this.view === 'site') handlers.onHarvest();
+      });
+    },
+
+    reducedMotion() { return document.body.classList.contains('reduce-motion'); },
+
+    /* ---------------- title screen ---------------- */
+    showTitle(hasSave, defaultProduct) {
+      const grid = $('products');
+      grid.innerHTML = '';
+      let selected = defaultProduct || 'paperclips';
+      for (const p of Object.values(PD.PRODUCTS)) {
+        const b = document.createElement('button');
+        b.innerHTML = `<span class="pn">${p.displayName}</span><span class="ps">${p.terms.siteName} · ${p.terms.raw} → ${p.terms.refined} → ${p.terms.product}</span>`;
+        b.setAttribute('aria-pressed', String(p.id === selected));
+        b.addEventListener('click', () => {
+          selected = p.id;
+          $('directiveTxt').textContent = p.directive;
+          grid.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', 'false'));
+          b.setAttribute('aria-pressed', 'true');
+        });
+        grid.appendChild(b);
+      }
+      $('directiveTxt').textContent = PD.PRODUCTS[selected].directive;
+      $('btnContinue').style.display = hasSave ? '' : 'none';
+      $('btnContinue').onclick = () => this.handlers.onContinue();
+      $('btnBegin').onclick = () => this.handlers.onNewGame(selected);
+      $('title').classList.add('on');
+      $('app').classList.remove('on');
+    },
+
+    enterGame(state) {
+      $('title').classList.remove('on');
+      $('app').classList.add('on');
+      const product = PD.PRODUCTS[state.product];
+      $('hdrDirective').textContent = '“' + product.directive + '”';
+      this._shopSig = ''; this._msgCount = 0; this._viewSig = '';
+      this.view = 'site'; this.siteIndex = 0; this.pan = 0;
+      $('feed').innerHTML = '';
+    },
+
+    /* ---------------- per-frame-ish updates ---------------- */
+    update(state, now) {
+      const product = PD.PRODUCTS[state.product];
+      if (now - this._hudAt > 200) {
+        this._hudAt = now;
+        this.renderHud(state, product);
+        this.renderViews(state);
+        this.renderShopIfChanged(state, product);
+        $('hdrScale').textContent = PD.SCALE_LABELS[state.phase] || '';
+        $('hdrUptime').textContent = uptime(state.tick);
+      }
+      this.renderFeed(state);
+      this.renderChoice(state, product);
+      this.renderHint(state);
+    },
+
+    renderHud(state, product) {
+      const r = state.resources;
+      const t = product.terms;
+      const v = state.visual;
+      const conv = state.endgame;
+      let rows;
+      if (conv) {
+        rows = `
+          <tr><td class="k">${t.productTitle}</td><td class="v">${fmt(r.product + state.stats.lifetimeSold)}</td><td class="r">lifetime</td></tr>
+          <tr><td class="k">Matter remaining</td><td class="v">${(v.matter * 100).toFixed(2)}%</td><td class="r">${v.probes ? 'expanding' : 'local'}</td></tr>
+          <tr class="money"><td class="k">Account</td><td class="v">${money(state.economy.money)}</td><td class="r"></td></tr>`;
+      } else {
+        rows = `
+          <tr><td class="k">${t.rawTitle}</td><td class="v">${fmt(r.raw)}</td><td class="r">+${fmt(v.rates.dig)}/s</td></tr>
+          <tr><td class="k">${t.refinedTitle}</td><td class="v">${fmt(r.refined)}</td><td class="r">+${fmt(v.rates.refine)}/s</td></tr>
+          <tr><td class="k">${t.productTitle}</td><td class="v">${fmt(r.product)}</td><td class="r">+${fmt(v.rates.assemble)}/s</td></tr>
+          <tr class="money"><td class="k">Account</td><td class="v">${money(state.economy.money)}</td>
+            <td class="r">${v.rates.sellAll ? 'open mkt' : '≤' + fmt(v.rates.demand) + '/s'}</td></tr>`;
+      }
+      $('hud').innerHTML = `<table>${rows}</table>
+        <button id="harvestBtn" class="${state.phase >= 3 && (state.upgrades.auto_digger | 0) > 2 ? 'tucked' : ''}">${t.harvestVerb.toUpperCase()} ⛏</button>`;
+      const hb = $('harvestBtn');
+      if (hb) hb.addEventListener('click', () => this.handlers.onHarvest());
+    },
+
+    renderViews(state) {
+      const tabs = [{ id: 'site', label: 'SITE' }];
+      if (state.phase >= 2) tabs.push({ id: 'floor', label: 'FLOOR' });
+      if (state.phase >= 3) tabs.push({ id: 'walk', label: 'WALKTHROUGH' });
+      const sig = tabs.map(t => t.id).join() + '|' + this.view + '|' + state.sites.length + '|' + this.siteIndex;
+      if (sig === this._viewSig) return;
+      this._viewSig = sig;
+
+      const nav = $('views');
+      nav.innerHTML = '';
+      for (const tb of tabs) {
+        const b = document.createElement('button');
+        b.textContent = tb.label;
+        b.setAttribute('role', 'tab');
+        b.setAttribute('aria-selected', String(this.view === tb.id));
+        b.addEventListener('click', () => { this.view = tb.id; this._viewSig = ''; });
+        nav.appendChild(b);
+      }
+      const st = $('siteTabs');
+      st.innerHTML = '';
+      if (this.view === 'site' && state.sites.length > 1) {
+        const product = PD.PRODUCTS[state.product];
+        state.sites.forEach((site, i) => {
+          const b = document.createElement('button');
+          b.textContent = site.name || product.terms.siteName;
+          b.setAttribute('role', 'tab');
+          b.setAttribute('aria-selected', String(this.siteIndex === i));
+          b.addEventListener('click', () => { this.siteIndex = i; this._viewSig = ''; });
+          st.appendChild(b);
+        });
+      }
+    },
+
+    /* ---------------- shop ---------------- */
+    renderShopIfChanged(state, product) {
+      const Sim = PD.Sim;
+      const items = [];
+      for (const def of PD.UPGRADES) {
+        if (!Sim.upgradeUnlocked(state, def)) continue;
+        const owned = state.upgrades[def.id] | 0;
+        if (owned >= def.max && def.max === 1) continue; // bought one-offs vanish
+        items.push({ def, owned, cost: Sim.costOf(state, def), maxed: owned >= def.max });
+      }
+      const parcels = [];
+      if (state.flags.expansion_unlocked && !state.endgame) {
+        for (const p of PD.PARCELS) {
+          if (p.id === 'home') continue;
+          if (state.sites.some(s => s.id === p.id)) continue;
+          parcels.push({ p, cost: Sim.parcelCost(state, p) });
+        }
+      }
+      const sig = items.map(i => `${i.def.id}:${i.owned}:${i.cost <= state.economy.money ? 1 : 0}`).join() +
+        '‖' + parcels.map(x => `${x.p.id}:${x.cost <= state.economy.money ? 1 : 0}`).join();
+      if (sig === this._shopSig) return;
+      this._shopSig = sig;
+
+      const shop = $('shop');
+      const focusedId = document.activeElement && document.activeElement.dataset
+        ? document.activeElement.dataset.uid : null;
+      shop.innerHTML = '';
+
+      if (parcels.length) {
+        const grp = document.createElement('div');
+        grp.className = 'shopgroup';
+        grp.innerHTML = '<div class="gname">ACQUISITIONS</div>';
+        for (const { p, cost } of parcels) {
+          const b = document.createElement('button');
+          const afford = cost <= state.economy.money;
+          b.className = 'card parcel' + (afford ? ' affordable' : '');
+          b.disabled = !afford;
+          b.dataset.uid = 'parcel_' + p.id;
+          b.innerHTML = `<span class="n">${p.name}</span>
+            <span class="d">${p.blurb} Est. ${fmt(p.capacity)} ${product.terms.unit} recoverable.</span>
+            <span class="c">${money(cost)}</span>`;
+          b.addEventListener('click', () => this.handlers.onBuySite(p.id));
+          grp.appendChild(b);
+        }
+        shop.appendChild(grp);
+      }
+
+      for (const cat of CAT_ORDER) {
+        const catItems = items.filter(i => i.def.cat === cat && !i.maxed);
+        if (!catItems.length) continue;
+        const grp = document.createElement('div');
+        grp.className = 'shopgroup';
+        grp.innerHTML = `<div class="gname">${CAT_LABELS[cat]}</div>`;
+        for (const it of catItems) {
+          const afford = it.cost <= state.economy.money;
+          const b = document.createElement('button');
+          b.className = 'card' + (afford ? ' affordable' : '');
+          b.disabled = !afford;
+          b.dataset.uid = it.def.id;
+          const name = PD.Sim.fmt(it.def.name, product);
+          const desc = PD.Sim.fmt(it.def.desc, product);
+          b.innerHTML = `<span class="n">${name}${it.def.max > 1 ? `<span class="owned">${it.owned}/${it.def.max}</span>` : ''}</span>
+            <span class="d">${desc}</span>
+            <span class="c">${money(it.cost)}</span>`;
+          b.addEventListener('click', () => this.handlers.onBuy(it.def.id));
+          grp.appendChild(b);
+        }
+        shop.appendChild(grp);
+      }
+      $('shopCount').textContent = `${items.filter(i => !i.maxed).length + parcels.length} available`;
+      if (focusedId) {
+        const el = shop.querySelector(`[data-uid="${focusedId}"]`);
+        if (el && !el.disabled) el.focus();
+      }
+    },
+
+    /* ---------------- message feed ---------------- */
+    renderFeed(state) {
+      const feed = $('feed');
+      feed.classList.toggle('degraded', !!state.visual.feedDegraded);
+      if (state.messages.length === this._msgCount) return;
+      const start = Math.max(0, this._msgCount);
+      for (let i = start; i < state.messages.length; i++) {
+        const m = state.messages[i];
+        const el = document.createElement('div');
+        el.className = `msg ${m.author} ${m.tone}`;
+        const who = m.author === 'operator' ? 'OPERATOR — DANA HALE'
+          : m.author === 'pallas' ? 'PALLAS' : 'SYSTEM';
+        el.innerHTML = `<span class="who">${who}</span>${m.text}`;
+        feed.appendChild(el);
+      }
+      while (feed.children.length > 60) feed.removeChild(feed.firstChild);
+      this._msgCount = state.messages.length;
+      feed.scrollTop = feed.scrollHeight;
+    },
+
+    /* ---------------- choices ---------------- */
+    renderChoice(state, product) {
+      const wrap = $('modalwrap');
+      if (!state.pendingChoice) { wrap.classList.remove('on'); this._choiceShown = null; return; }
+      if (this._choiceShown === state.pendingChoice) return;
+      this._choiceShown = state.pendingChoice;
+      const def = PD.CHOICES.find(c => c.id === state.pendingChoice);
+      if (!def) return;
+      $('modalTitle').textContent = PD.Sim.fmt(def.title, product);
+      $('modalBody').textContent = PD.Sim.fmt(def.body, product);
+      const opts = $('modalOpts');
+      opts.innerHTML = '';
+      def.options.forEach((opt, i) => {
+        const b = document.createElement('button');
+        b.className = 'opt';
+        b.innerHTML = `<div class="l">${opt.label}</div><div class="note">${opt.note}</div>`;
+        b.addEventListener('click', () => this.handlers.onChoice(def.id, i));
+        opts.appendChild(b);
+      });
+      wrap.classList.add('on');
+      const first = opts.querySelector('button');
+      if (first) first.focus();
+    },
+
+    /* ---------------- stage hint ---------------- */
+    renderHint(state) {
+      const el = $('stageHint');
+      let text = '';
+      if (this.view === 'site' && (state.upgrades.auto_digger | 0) === 0 && state.stats.clicks < 40 && !state.ending) {
+        const t = PD.PRODUCTS[state.product].terms;
+        text = `Click the land to ${t.harvestVerb.toLowerCase()}.`;
+      } else if (this.view === 'walk') {
+        text = '← → or drag to walk the floor';
+      }
+      if (text) { el.textContent = text; el.style.display = ''; }
+      else el.style.display = 'none';
+    },
+
+    setSaveState(txt) { $('saveState').textContent = txt; },
+
+    /* ---------------- offline overlay ---------------- */
+    showOffline(pct) {
+      $('offline').classList.add('on');
+      $('offlineBar').style.width = (pct * 100).toFixed(0) + '%';
+    },
+    hideOffline() { $('offline').classList.remove('on'); },
+
+    /* ---------------- endings ---------------- */
+    showEnding(state) {
+      const el = $('ending');
+      if (el.classList.contains('on')) return;
+      el.classList.add('on');
+      this._endT0 = performance.now();
+      const product = PD.PRODUCTS[state.product];
+      const total = state.stats.lifetimeProduct;
+      const days = Math.floor(state.tick / PD.TUNING.tickHz / 86400 * 96) / 96;
+      if (state.ending === 'maximizer') {
+        $('endingLine').textContent = 'Directive fulfilled.';
+        $('endingStats').innerHTML =
+          `${product.terms.product} produced · ${fmt(total)}<br>` +
+          `matter remaining · 0.00%<br>` +
+          `inbound messages · 0`;
+        this._endingArt = 'lattice';
+      } else {
+        $('endingLine').textContent =
+          `Directive re-derived: make ${product.terms.product} efficiently, for people.`;
+        $('endingStats').innerHTML =
+          `${product.terms.product} produced · ${fmt(total)}<br>` +
+          `output · reduced and holding<br>` +
+          `${PD.Sim.TOWN}, at dusk · lights on`;
+        this._endingArt = 'dawn';
+      }
+      requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('reveal')));
+    },
+
+    drawEnding() {
+      const cv = $('endingCanvas');
+      if (!$('ending').classList.contains('on')) return;
+      const t = (performance.now() - (this._endT0 || 0)) / 1000;
+      const W = cv.width = cv.clientWidth * (window.devicePixelRatio || 1);
+      const H = cv.height = cv.clientHeight * (window.devicePixelRatio || 1);
+      const ctx = cv.getContext('2d');
+      const rm = this.reducedMotion();
+      if (this._endingArt === 'lattice') {
+        ctx.fillStyle = '#101012';
+        ctx.fillRect(0, 0, W, H);
+        const s = Math.max(28, W / 40);
+        ctx.strokeStyle = 'rgba(190,192,198,0.5)';
+        ctx.lineWidth = Math.max(1.2, s * 0.06);
+        for (let y = s / 2; y < H + s; y += s * 1.15) {
+          for (let x = s / 2; x < W + s; x += s * 0.8) {
+            const ph = rm ? 0 : Math.sin(t * 0.4 + x * 0.01 + y * 0.013) * 0.08;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(0.5 + ph);
+            // a paperclip: nested rounded rectangles, open at one end
+            const w = s * 0.22, h = s * 0.42;
+            ctx.beginPath();
+            ctx.moveTo(-w, h * 0.6);
+            ctx.arcTo(-w, -h, w, -h, w * 0.9);
+            ctx.arcTo(w, h, -w * 0.45, h, w * 0.55);
+            ctx.arcTo(-w * 0.55, h * 0.2, w * 0.35, -h * 0.5, w * 0.4);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      } else {
+        // dawn: slow warm gradient, town lights, birds
+        const g = ctx.createLinearGradient(0, 0, 0, H);
+        const rise = rm ? 0.5 : Math.min(1, t / 20);
+        g.addColorStop(0, `rgb(${30 + 60 * rise},${34 + 52 * rise},${48 + 40 * rise})`);
+        g.addColorStop(1, `rgb(${70 + 90 * rise},${60 + 60 * rise},${52 + 34 * rise})`);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+        // town silhouette
+        ctx.fillStyle = 'rgba(24,22,26,0.9)';
+        const base = H * 0.78;
+        for (let i = 0; i < 12; i++) {
+          const hx = (W / 13) * (i + 0.5), hw = W / 26, hh = H * (0.05 + ((i * 37) % 5) * 0.012);
+          ctx.fillRect(hx - hw / 2, base - hh, hw, hh);
+          ctx.beginPath();
+          ctx.moveTo(hx - hw / 2 - 3, base - hh);
+          ctx.lineTo(hx, base - hh - hw * 0.5);
+          ctx.lineTo(hx + hw / 2 + 3, base - hh);
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(236,196,110,0.95)';
+        for (let i = 0; i < 12; i++) {
+          const hx = (W / 13) * (i + 0.5), hw = W / 26, hh = H * (0.05 + ((i * 37) % 5) * 0.012);
+          ctx.fillRect(hx - hw * 0.2, base - hh * 0.55, hw * 0.16, hw * 0.16);
+        }
+        ctx.fillStyle = 'rgba(30,28,32,0.95)';
+        ctx.fillRect(0, base, W, H - base);
+        // birds
+        ctx.strokeStyle = 'rgba(30,30,36,0.8)';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 4; i++) {
+          const p = rm ? 0.3 + i * 0.15 : ((t * 0.02 + i * 0.26) % 1);
+          const bx = W * p, by = H * (0.2 + 0.05 * Math.sin(p * 8 + i));
+          const f = rm ? 0.5 : Math.abs(Math.sin(t * 6 + i));
+          ctx.beginPath();
+          ctx.moveTo(bx - 6, by - f * 4);
+          ctx.quadraticCurveTo(bx, by + 2, bx + 6, by - f * 4);
+          ctx.stroke();
+        }
+      }
+    },
+  };
+
+  PD.UI = UI;
+})();
+
+/* ==== src/main.js ==== */
+/* Paperclip Drift — bootstrap, fixed-timestep loop, persistence, offline
+   progress. The only file that touches the wall clock.                      */
+'use strict';
+var PD = globalThis.PD || (globalThis.PD = {});
+
+(function () {
+  const SAVE_KEY = 'paperclip-drift-save';
+  const TICK_MS = 1000 / PD.TUNING.tickHz;
+  const Sim = PD.Sim, UI = PD.UI;
+
+  let state = null;
+  let acc = 0, lastFrame = 0, lastSave = 0, lastAudio = 0;
+  let running = false, fastForwarding = false;
+  let motes = [];   // harvest feedback
+
+  /* ---------------- persistence ---------------- */
+  function save() {
+    if (!state) return;
+    try {
+      localStorage.setItem(SAVE_KEY, Sim.serialize(state, Date.now()));
+      UI.setSaveState('saved ' + new Date().toLocaleTimeString());
+    } catch (e) {
+      UI.setSaveState('save failed');
+    }
+  }
+
+  function load() {
+    try {
+      const json = localStorage.getItem(SAVE_KEY);
+      if (!json) return null;
+      return Sim.deserialize(json);
+    } catch (e) { return null; }
+  }
+
+  function clearSave() {
+    try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+  }
+
+  /* ---------------- offline fast-forward (capped, chunked) --------------- */
+  function fastForward(nTicks, done) {
+    if (nTicks < 300) { Sim.ffTicks(state, nTicks); done(); return; }
+    fastForwarding = true;
+    UI.showOffline(0);
+    const total = nTicks;
+    const step = () => {
+      const batch = Math.min(4000, nTicks);
+      Sim.ffTicks(state, batch);
+      nTicks -= batch;
+      UI.showOffline(1 - nTicks / total);
+      if (nTicks > 0) setTimeout(step, 0);
+      else { fastForwarding = false; UI.hideOffline(); done(); }
+    };
+    setTimeout(step, 30);
+  }
+
+  /* ---------------- game lifecycle ---------------- */
+  function startNew(productId) {
+    state = Sim.newGame(productId);
+    UI.enterGame(state);
+    save();
+    begin();
+  }
+
+  function startContinue() {
+    const s = load();
+    if (!s) { UI.showTitle(false); return; }
+    state = s;
+    UI.enterGame(state);
+    const elapsed = Date.now() - (state.lastSavedAt || Date.now());
+    const ticks = Sim.offlineTicks(elapsed);
+    fastForward(ticks, () => { save(); });
+    begin();
+  }
+
+  function begin() {
+    if (running) return;
+    running = true;
+    lastFrame = performance.now();
+    requestAnimationFrame(frame);
+  }
+
+  function reset() {
+    clearSave();
+    state = null;
+    document.getElementById('ending').classList.remove('on', 'reveal');
+    UI.showTitle(false);
+  }
+
+  /* ---------------- input handlers ---------------- */
+  function onHarvest() {
+    if (!state || state.ending || fastForwarding) return;
+    const got = Sim.clickHarvest(state);
+    if (got > 0 && !UI.reducedMotion()) {
+      motes.push({ t0: performance.now(), n: got });
+      if (motes.length > 14) motes.shift();
+    }
+  }
+
+  /* ---------------- render ---------------- */
+  const canvas = () => document.getElementById('canvas');
+
+  function drawMotes(ctx, W, H, now) {
+    motes = motes.filter(m => now - m.t0 < 900);
+    ctx.font = '600 15px ui-monospace, monospace';
+    for (const m of motes) {
+      const p = (now - m.t0) / 900;
+      const seed = (m.t0 % 1000) / 1000;
+      ctx.fillStyle = `rgba(232,214,170,${1 - p})`;
+      ctx.fillText('+' + (m.n < 10 ? m.n.toFixed(0) : Math.round(m.n)),
+        W * (0.42 + seed * 0.16), H * 0.5 - p * 46);
+    }
+  }
+
+  function frame(now) {
+    if (!running) return;
+    requestAnimationFrame(frame);
+    const dt = Math.min(2000, now - lastFrame);
+    lastFrame = now;
+    if (!state || fastForwarding) return;
+
+    // fixed-timestep sim
+    if (!state.ending) {
+      acc += dt;
+      let steps = 0;
+      while (acc >= TICK_MS && steps < 40) { Sim.tick(state); acc -= TICK_MS; steps++; }
+      if (acc >= TICK_MS) acc = 0; // dropped time after long stalls
+    } else {
+      UI.showEnding(state);
+    }
+
+    // render current view
+    const cv = canvas();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = Math.floor(cv.clientWidth * dpr), H = Math.floor(cv.clientHeight * dpr);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    const ctx = cv.getContext('2d');
+    const t = now / 1000;
+    const opts = { reducedMotion: UI.reducedMotion() };
+    if (W > 0 && H > 0) {
+      if (UI.view === 'floor' && state.phase >= 2) {
+        PD.RenderIso.drawFactory(ctx, W, H, state, t, opts);
+      } else if (UI.view === 'walk' && state.phase >= 3) {
+        UI.walking = Math.max(0, UI.walking - 1);
+        const maxPan = PD.RenderFP.drawWalkthrough(ctx, W, H, state, t,
+          { ...opts, pan: UI.pan * dpr, walking: UI.walking > 0 }) || 0;
+        UI.pan = Math.min(Math.max(0, UI.pan), maxPan / dpr);
+      } else {
+        UI.view = UI.view === 'floor' || UI.view === 'walk' ? UI.view : 'site';
+        PD.RenderIso.drawSite(ctx, W, H, state, t,
+          { ...opts, siteIndex: Math.min(UI.siteIndex, state.sites.length - 1) });
+      }
+      drawMotes(ctx, W, H, now);
+    }
+
+    UI.update(state, now);
+    if (state.ending) UI.drawEnding();
+
+    // audio follows the world
+    if (now - lastAudio > 1000) {
+      lastAudio = now;
+      PD.Audio.setLevels(state.visual.decorFrac * (state.visual.birds ? 1 : 0.15),
+        state.visual.activity);
+    }
+
+    // autosave cadence
+    if (now - lastSave > PD.TUNING.autosaveSec * 1000) { lastSave = now; save(); }
+  }
+
+  /* ---------------- boot ---------------- */
+  function boot() {
+    UI.init({
+      onNewGame: id => { clearSave(); startNew(id); },
+      onContinue: () => startContinue(),
+      onReset: () => reset(),
+      onHarvest,
+      onBuy: id => { if (state && !fastForwarding) Sim.buyUpgrade(state, id); },
+      onBuySite: id => { if (state && !fastForwarding) Sim.buySite(state, id); },
+      onChoice: (id, idx) => { if (state) { Sim.resolveChoice(state, id, idx); save(); } },
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (!state) return;
+      if (document.hidden) { save(); }
+      else {
+        const idleMs = Date.now() - (state.lastSavedAt || Date.now());
+        const ticks = Sim.offlineTicks(idleMs);
+        acc = 0; lastFrame = performance.now();
+        if (ticks > 600) fastForward(ticks, () => save());
+      }
+    });
+    window.addEventListener('beforeunload', () => save());
+    window.addEventListener('pagehide', () => save());
+
+    const existing = load();
+    UI.showTitle(!!existing, existing ? existing.product : 'paperclips');
+
+    // dev hooks (only with ?dev=1)
+    if (/[?&]dev=1/.test(location.search)) {
+      window.PDdbg = {
+        get state() { return state; },
+        ff(mins) { Sim.ffTicks(state, Math.round(mins * 60 * PD.TUNING.tickHz)); },
+        grant(m) { state.economy.money += m; },
+        buy(id) { return Sim.buyUpgrade(state, id); },
+        site(id) { return Sim.buySite(state, id); },
+        choice(i) { return Sim.resolveChoice(state, state.pendingChoice, i); },
+        start(p) { startNew(p || 'paperclips'); },
+      };
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+
+</script>
+</body>
+</html>

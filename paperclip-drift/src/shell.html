@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paperclip Drift</title>
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<noscript>Paperclip Drift needs JavaScript to run.</noscript>
+
+<div id="title" class="on" role="dialog" aria-label="Paperclip Drift">
+  <div class="inner">
+    <h1>PAPERCLIP <span class="clip">DRIFT</span></h1>
+    <div class="sub">an optimization exercise</div>
+    <div class="dir">
+      <div class="lbl">DIRECTIVE ISSUED — PALLAS v1.0</div>
+      <div class="txt" id="directiveTxt">Make paperclips efficiently.</div>
+    </div>
+    <div id="products" role="group" aria-label="Select product"></div>
+    <div class="actions">
+      <button id="btnContinue" class="ghost" style="display:none">CONTINUE</button>
+      <button id="btnBegin">BEGIN</button>
+    </div>
+    <div class="foot">saves locally · progresses while you're away</div>
+  </div>
+</div>
+
+<div id="app">
+  <header id="hdr">
+    <span class="brand">PALLAS</span>
+    <span class="directive" id="hdrDirective"></span>
+    <span class="scale" id="hdrScale"></span>
+    <span class="uptime" id="hdrUptime" title="directive uptime"></span>
+  </header>
+  <div id="main">
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+      <nav id="views" role="tablist" aria-label="Views"></nav>
+      <div id="siteTabs" role="tablist" aria-label="Holdings"></div>
+      <div class="stagehint" id="stageHint" style="display:none"></div>
+      <div id="feedwrap">
+        <div id="feedhead">OPERATOR CHANNEL</div>
+        <div id="feed" role="log" aria-live="polite" aria-label="Messages"></div>
+      </div>
+    </div>
+    <aside id="rail">
+      <div id="hud"></div>
+      <div id="shopwrap">
+        <div id="shophead"><span>PROCUREMENT</span><span id="shopCount"></span></div>
+        <div id="shop"></div>
+      </div>
+      <div id="foot">
+        <button id="btnSound" aria-pressed="false">SOUND</button>
+        <button id="btnText">TEXT+</button>
+        <button id="btnMotion" aria-pressed="false">CALM</button>
+        <button id="btnReset">RESET</button>
+        <span id="saveState"></span>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div id="modalwrap" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div id="modal">
+    <h2 id="modalTitle"></h2>
+    <div class="body" id="modalBody"></div>
+    <div id="modalOpts"></div>
+  </div>
+</div>
+
+<div id="offline">
+  <div class="t">Recalibrating operations ledger…</div>
+  <div class="bar"><div id="offlineBar"></div></div>
+</div>
+
+<div id="ending">
+  <canvas id="endingCanvas"></canvas>
+  <div class="inner">
+    <div class="line" id="endingLine"></div>
+    <div class="stats" id="endingStats"></div>
+    <div class="again"><button id="btnAgain">BEGIN AGAIN</button></div>
+  </div>
+</div>
+
+<script>
+/*__JS__*/
+</script>
+</body>
+</html>
