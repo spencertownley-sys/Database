@@ -58,6 +58,12 @@ var PD = globalThis.PD || (globalThis.PD = {});
       },
       messages: [],
       flags: {},
+      rngSeed: 0x5eed1234,
+      click: { streak: 0, lastTick: -999, best: 0 },
+      surge: { readyAt: 0, activeUntil: 0, used: 0 },
+      seams: [],
+      seamSeq: 0,
+      fx: [],            // transient render cues, drained by the presentation layer
       pendingChoice: null,
       choicesResolved: {},
       permOps: [],
@@ -69,6 +75,20 @@ var PD = globalThis.PD || (globalThis.PD = {});
     };
     computeVisual(s);
     return s;
+  }
+
+  /* Deterministic PRNG: same seed, same sequence, so replays and offline
+     fast-forward stay exact. */
+  function rnd(s) {
+    let x = s.rngSeed | 0;
+    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+    s.rngSeed = x | 0;
+    return (x >>> 0) / 4294967296;
+  }
+
+  function fx(s, kind, data) {
+    s.fx.push(Object.assign({ kind, at: s.tick }, data || {}));
+    if (s.fx.length > 40) s.fx.splice(0, s.fx.length - 40);
   }
 
   function setFlag(s, k, v) {
@@ -175,6 +195,7 @@ var PD = globalThis.PD || (globalThis.PD = {});
     s.stats.lifetimeSpent += cost;
     s.upgrades[id] = owned + 1;
     s.stats.upgradesBought++;
+    fx(s, 'buy', { id, cat: def.cat });
     for (const op of def.stated) if (op.special) runSpecial(s, op.special);
     applyHidden(s, def.hidden);
     return true;
@@ -216,29 +237,116 @@ var PD = globalThis.PD || (globalThis.PD = {});
     s.economy.money -= cost;
     s.stats.lifetimeSpent += cost;
     s.sites.push(makeSite(parcel, s.sites.length));
+    fx(s, 'site', { id: parcelId });
     applyHidden(s, parcel.hidden);
     if (s.sites.length >= 2 && s.phase < 4) advancePhase(s, 4);
     return true;
   }
 
   /* ---- manual harvest ---------------------------------------------------- */
+  /* Manual harvest. Consecutive clicks build a streak multiplier and can
+     land a critical strike — the early game rewards attention, the late game
+     leaves it behind. When the ground is spent, hand-picking the spoil heaps
+     still returns a trickle, so a stripped site can never dead-end the run.
+     Returns what happened so the view can react. */
   function clickHarvest(s) {
-    if (s.ending) return 0;
+    if (s.ending) return null;
     const rates = computeRates(s);
-    // draw from the least-depleted owned site
     let best = null, bestRich = -1;
     for (const site of s.sites) {
       const rich = 1 - site.mined / site.capacity;
       if (rich > bestRich) { bestRich = rich; best = site; }
     }
-    if (!best || bestRich <= 0) return 0;
-    const eff = 0.4 + 0.6 * bestRich;
-    const got = Math.min(rates.click * eff, best.capacity - best.mined);
-    best.mined += got;
+
+    const gap = s.tick - s.click.lastTick;
+    s.click.streak = gap <= T.streakWindowTicks ? Math.min(T.streakMax, s.click.streak + 1) : 0;
+    s.click.lastTick = s.tick;
+    if (s.click.streak > s.click.best) s.click.best = s.click.streak;
+
+    const streakMul = 1 + s.click.streak * T.streakPerStep;
+    const crit = rnd(s) < T.critChance;
+    const critMul = crit ? T.critMult : 1;
+
+    let got, salvage = false;
+    if (!best || bestRich <= 0) {
+      got = T.clickYield * T.salvageFrac * streakMul * critMul;
+      salvage = true;
+    } else {
+      const eff = 0.4 + 0.6 * bestRich;
+      got = Math.min(rates.click * eff * streakMul * critMul, best.capacity - best.mined);
+      best.mined += got;
+    }
     s.resources.raw += got;
     s.stats.lifetimeRaw += got;
     s.stats.clicks++;
-    return got;
+    return {
+      amount: got, crit, salvage, streak: s.click.streak,
+      siteIndex: best ? s.sites.indexOf(best) : 0,
+    };
+  }
+
+  /* ---- surge: a short, deliberate throughput push on a cooldown -------- */
+  function surgeState(s) {
+    return {
+      active: s.tick < s.surge.activeUntil,
+      ready: s.tick >= s.surge.readyAt && s.tick >= s.surge.activeUntil,
+      activeFrac: s.tick < s.surge.activeUntil
+        ? (s.surge.activeUntil - s.tick) / (T.surgeSecs * T.tickHz) : 0,
+      cooldownFrac: s.tick < s.surge.readyAt
+        ? 1 - (s.surge.readyAt - s.tick) / (T.surgeCooldownSecs * T.tickHz) : 1,
+    };
+  }
+
+  function triggerSurge(s) {
+    if (s.ending) return false;
+    const st = surgeState(s);
+    if (!st.ready) return false;
+    s.surge.activeUntil = s.tick + T.surgeSecs * T.tickHz;
+    s.surge.readyAt = s.tick + (T.surgeSecs + T.surgeCooldownSecs) * T.tickHz;
+    s.surge.used++;
+    s.mods.push({ mult: T.surgeMult, untilTick: s.surge.activeUntil });
+    applyHidden(s, [{ k: 'pollution', add: 0.004 }, { k: 'autonomy', add: 0.002 }]);
+    fx(s, 'surge');
+    return true;
+  }
+
+  /* ---- exposed seams: brief, clickable bonuses out on the land --------- */
+  function updateSeams(s, rates) {
+    for (let i = s.seams.length - 1; i >= 0; i--) {
+      if (s.tick >= s.seams[i].expires) s.seams.splice(i, 1);
+    }
+    if (s.ending || s.endgame) return;
+    if (s.tick % T.seamCheckTicks !== 0) return;
+    if (s.seams.length >= T.seamMaxLive) return;
+    if (rnd(s) > T.seamChance) return;
+    const liveSites = s.sites.filter(site => site.mined < site.capacity);
+    if (!liveSites.length) return;
+    const site = liveSites[Math.floor(rnd(s) * liveSites.length) % liveSites.length];
+    const yieldRate = Math.max(rates.dig + rates.rawFlat, rates.click * 2, 1);
+    s.seams.push({
+      id: ++s.seamSeq,
+      site: s.sites.indexOf(site),
+      a: rnd(s),                                   // angular position on the site
+      r: 0.42 + rnd(s) * 0.5,                      // normalised radius from centre
+      expires: s.tick + T.seamTtlTicks,
+      born: s.tick,
+      value: yieldRate * T.seamSecondsOfYield,
+    });
+  }
+
+  function collectSeam(s, id) {
+    const i = s.seams.findIndex(x => x.id === id);
+    if (i < 0) return null;
+    const seam = s.seams[i];
+    s.seams.splice(i, 1);
+    const site = s.sites[seam.site];
+    if (!site) return null;
+    const got = Math.min(seam.value, site.capacity - site.mined);
+    site.mined += got;
+    s.resources.raw += got;
+    s.stats.lifetimeRaw += got;
+    fx(s, 'seam', { amount: got });
+    return { amount: got };
   }
 
   /* ---- choices ----------------------------------------------------------- */
@@ -255,6 +363,7 @@ var PD = globalThis.PD || (globalThis.PD = {});
   /* ---- phase progression ------------------------------------------------- */
   function advancePhase(s, p) {
     if (p <= s.phase) return;
+    fx(s, 'phase', { phase: p });
     s.phase = p;
     setFlag(s, 'phase' + p, true);
     setFlag(s, 'phase' + p + '_at', s.tick); // convenience alias used by triggers
@@ -409,11 +518,27 @@ var PD = globalThis.PD || (globalThis.PD = {});
       setFlag(s, 'ended', true);
     }
 
-    // expire mods
+    // expire mods; refresh active-play props
     if (s.mods.length) s.mods = s.mods.filter(m => m.untilTick > s.tick);
+    if (s.click.streak && s.tick - s.click.lastTick > T.streakWindowTicks) s.click.streak = 0;
+    updateSeams(s, rates);
 
     // 5. derived visual state (the only decay data the renderer may read)
     computeVisual(s, rates, thrNorm);
+  }
+
+  /* Time of day advances with the sim, so it survives saves and offline
+     fast-forward. Purely cosmetic — nothing reads it back. */
+  function dayState(s) {
+    const phase = ((s.tick / T.ticksPerDay) + 0.32) % 1;
+    const elev = Math.sin(phase * Math.PI * 2 - Math.PI / 2);   // -1 night, +1 noon
+    const light = clamp01(0.5 + elev * 0.62);
+    return {
+      phase, elev, light,
+      night: elev < -0.12,
+      golden: elev > -0.1 && elev < 0.35,
+      sunX: Math.cos(phase * Math.PI * 2 - Math.PI / 2),
+    };
   }
 
   /* ---- derived visuals: pure function of hidden state --------------------- */
@@ -452,6 +577,13 @@ var PD = globalThis.PD || (globalThis.PD = {});
       chatter: s.factory.workers > 0,
       breakCharging: h.unemployment > 0.5 || s.factory.robots >= 8,
       feedDegraded: h.oversight < 0.3,
+      day: dayState(s),
+      wind: 0.45 + 0.35 * Math.sin(s.tick / 470) + 0.2 * Math.sin(s.tick / 131),
+      streak: s.click.streak,
+      streakMul: 1 + s.click.streak * T.streakPerStep,
+      surge: surgeState(s),
+      seams: s.seams.map(x => ({ id: x.id, site: x.site, a: x.a, r: x.r,
+        age: (s.tick - x.born) / (x.expires - x.born) })),
       skyDrift: clamp01(h.pollution * 0.9 + (1 - h.ecology) * 0.35),
     };
   }
@@ -482,6 +614,7 @@ var PD = globalThis.PD || (globalThis.PD = {});
 
   PD.Sim = {
     newGame, tick, ffTicks, offlineTicks, clickHarvest,
+    triggerSurge, surgeState, collectSeam,
     buyUpgrade, buySite, resolveChoice, upgradeUnlocked, costOf, parcelCost,
     computeRates, serialize, deserialize, fmt, TOWN,
   };

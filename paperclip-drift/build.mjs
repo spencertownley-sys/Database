@@ -11,7 +11,10 @@ const read = f => readFileSync(join(root, f), 'utf8');
 const JS_FILES = [
   'src/data.js',
   'src/sim.js',
-  'src/render_iso.js',
+  'src/gfx.js',
+  'src/art.js',
+  'src/render_site.js',
+  'src/render_factory.js',
   'src/render_fp.js',
   'src/audio.js',
   'src/ui.js',

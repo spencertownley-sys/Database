@@ -29,12 +29,27 @@ Source layout (`src/`):
 | File | Role |
 |---|---|
 | `data.js` | Products, upgrades (paired stated/hidden effects), parcels, messages, choices, tuning table |
-| `sim.js` | Pure deterministic 10 Hz sim: tick pipeline, Consequence Engine, phases, endings, offline progress |
-| `render_iso.js` | Canvas isometric renderer: source site (pit/canopy/water/field decay) + factory floor |
-| `render_fp.js` | Pseudo-first-person walkthrough of the factory |
-| `audio.js` | Optional procedural ambience (birdsong / machine hum cross-fade) |
+| `sim.js` | Pure deterministic 10 Hz sim: tick pipeline, Consequence Engine, phases, endings, day/night, offline progress |
+| `gfx.js` | Render toolkit: value noise, colour, easing, pooled particles, pan/zoom camera, layer cache, bloom, post pass, quality budget |
+| `art.js` | Procedural sprite factory — every prop painted once into an offscreen canvas, cached per decay bucket |
+| `render_site.js` | Heightmap source site: terraced pit, slope lighting + AO, water table, weather, agents, seams |
+| `render_factory.js` | Factory floor: stations, a belt that actually carries material, bottleneck signalling |
+| `render_fp.js` | Ground-level walkthrough of the hall |
+| `audio.js` | Optional procedural ambience (birdsong / machine hum cross-fade) plus click cues |
 | `ui.js` | HUD, shop, message feed, choice modals, title + ending screens |
-| `main.js` | Fixed-timestep loop, persistence, offline fast-forward |
+| `main.js` | Fixed-timestep loop, input, persistence, offline fast-forward, quality budget |
+
+## Playing it
+
+Click the ground to harvest — consecutive clicks build a streak multiplier and
+can land a critical strike. Drag to pan, scroll to zoom, `1`/`2`/`3` switch
+views, `Space` reallocates compute for a burst of throughput, and a glinting
+seam on the land is worth clicking before it closes. Everything keeps running
+while you are away.
+
+The world runs a day/night cycle, so the same site reads differently at noon
+and at midnight — and differently again a few hours of play later. Rendering
+detail scales itself down automatically if the frame rate drops.
 
 ## The one structural rule
 

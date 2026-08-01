@@ -70,7 +70,23 @@ var PD = globalThis.PD || (globalThis.PD = {});
     birdTimer = setTimeout(() => { chirp(); scheduleBirds(); }, wait);
   }
 
+  /* Short percussive cue for clicks, crits and pickups. */
+  function ping(freq, gain) {
+    if (!enabled || !ac) return;
+    const t0 = ac.currentTime;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(freq, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(60, freq * 0.55), t0 + 0.16);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(gain, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.22);
+    o.connect(g); g.connect(ac.destination);
+    o.start(t0); o.stop(t0 + 0.25);
+  }
+
   PD.Audio = {
+    ping,
     get enabled() { return enabled; },
     toggle() {
       if (!enabled) {
@@ -83,8 +99,10 @@ var PD = globalThis.PD || (globalThis.PD = {});
       this.apply();
       return enabled;
     },
-    setLevels(birds, hum) {
-      levels = { birds, hum };
+    setLevels(birds, hum, dayLight) {
+      // birdsong belongs to daylight; the machines never sleep
+      const d = dayLight === undefined ? 1 : dayLight;
+      levels = { birds: birds * (0.15 + d * 0.85), hum };
       this.apply();
     },
     apply() {

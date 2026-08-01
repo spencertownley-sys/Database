@@ -33,6 +33,8 @@
     <span class="brand">PALLAS</span>
     <span class="directive" id="hdrDirective"></span>
     <span class="scale" id="hdrScale"></span>
+    <span class="phase" id="hdrPhase"></span>
+    <span class="clock" id="hdrClock" title="site time"></span>
     <span class="uptime" id="hdrUptime" title="directive uptime"></span>
   </header>
   <div id="main">
@@ -40,7 +42,8 @@
       <canvas id="canvas"></canvas>
       <nav id="views" role="tablist" aria-label="Views"></nav>
       <div id="siteTabs" role="tablist" aria-label="Holdings"></div>
-      <div class="stagehint" id="stageHint" style="display:none"></div>
+      <div class="stagehint" id="stageHint"></div>
+      <div id="banner" aria-live="polite"></div>
       <div id="feedwrap">
         <div id="feedhead">OPERATOR CHANNEL</div>
         <div id="feed" role="log" aria-live="polite" aria-label="Messages"></div>

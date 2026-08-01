@@ -18,6 +18,22 @@ PD.TUNING = {
   robotEff: 0.5,           // crew bonus per robot
   offlineCapHours: 8,
   autosaveSec: 10,
+  // active play
+  streakWindowTicks: 12,      // clicks within 1.2s keep a streak alive
+  streakMax: 30,
+  streakPerStep: 0.06,
+  critChance: 0.09,
+  critMult: 6,
+  surgeSecs: 30,
+  surgeCooldownSecs: 180,
+  surgeMult: 3,
+  seamMaxLive: 3,
+  seamCheckTicks: 50,
+  seamChance: 0.09,
+  seamTtlTicks: 380,
+  seamSecondsOfYield: 45,
+  salvageFrac: 0.45,          // hand-picking spoil once a site is spent
+  ticksPerDay: 5400,          // a full day/night cycle, 9 minutes
   // hidden pressure rates (per second at normalized intensity 1)
   pollutionPerThroughput: 0.00022,
   pollutionDecay: 0.000018,

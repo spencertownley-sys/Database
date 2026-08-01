@@ -53,8 +53,11 @@ function runBot({ name, product = 'paperclips', optimize, maxMinutes, clickUntil
   const events = [];
 
   while (s.tick < maxTicks && !s.ending) {
-    // manual clicking early (a human would click ~3/s while engaged)
-    if (mins(s.tick) < clickUntil && (s.upgrades.auto_digger | 0) < 3 && s.tick % 3 === 0) {
+    // manual clicking: early on while engaged, and again any time income
+    // dries up — a stuck player goes back to clicking
+    const stalled = s.stats.lifetimeEarned - lastEarned < 0.5 && s.tick > 60 * HZ;
+    if (s.tick % 3 === 0 &&
+      ((mins(s.tick) < clickUntil && (s.upgrades.auto_digger | 0) < 3) || stalled)) {
       Sim.clickHarvest(s);
     }
     // answer choices
@@ -204,7 +207,8 @@ console.log('PASS all six products tick cleanly');
    they may read only stated data and the derived state.visual. */
 {
   const banned = /\.hidden\b|hidden\[|pollution|depletion|ecology|oversight|autonomy|unemployment|\btrust\b/;
-  for (const f of ['src/ui.js', 'src/render_iso.js', 'src/render_fp.js', 'src/audio.js', 'src/style.css', 'src/shell.html']) {
+  for (const f of ['src/ui.js', 'src/gfx.js', 'src/art.js', 'src/render_site.js',
+    'src/render_factory.js', 'src/render_fp.js', 'src/audio.js', 'src/style.css', 'src/shell.html']) {
     const src = readFileSync(join(root, f), 'utf8');
     const bad = src.split('\n').map((l, i) => banned.test(l) ? `${f}:${i + 1}: ${l.trim()}` : null).filter(Boolean);
     assert.deepStrictEqual(bad, [], 'UI/render layer references consequence-engine fields');
