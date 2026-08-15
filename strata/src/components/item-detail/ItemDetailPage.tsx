@@ -6,7 +6,6 @@
  * surfaces, so they cannot drift.
  */
 
-import { useEffect } from 'react';
 import type { Field, FieldGroup } from '@/server/db/schema/itemTypes';
 import { setWorkspaceId } from '@/lib/api';
 import { ItemDetailPanel } from './ItemDetailPanel';
@@ -19,9 +18,10 @@ export function ItemDetailPage(props: {
   fieldGroups: FieldGroup[];
   members: WorkspaceMemberOption[];
 }) {
-  useEffect(() => {
-    setWorkspaceId(props.workspaceId);
-  }, [props.workspaceId]);
+  // Pinned during render, not in an effect: the panel is a child, child
+  // effects run before parent effects, and the panel's first queries would
+  // fire without the workspace header and 400.
+  setWorkspaceId(props.workspaceId);
 
   return (
     <ItemDetailPanel

@@ -21,11 +21,12 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Tx } from '@/server/db';
 import { items, itemFieldIndex, type Item, type ItemValues, type InvalidValues } from '@/server/db/schema/items';
 import { itemTreeNodes, treeNodes } from '@/server/db/schema/trees';
-import { itemTypes, type Field } from '@/server/db/schema/itemTypes';
+import { fields as fieldsTable, itemTypes, type Field } from '@/server/db/schema/itemTypes';
+import type { ItemDraft } from '@/server/db/schema/changeSets';
 import { AppError } from '@/server/lib/errors';
 import { assertDepthAfterMove, assertNoCycle, pathDepth } from '@/server/lib/ltree';
 import { computeCompleteness } from './completeness.service';
-import { computeEffectiveValues, ownEffectiveValues } from './variants.service';
+import { computeEffectiveValues, ownEffectiveValues, planVariantCoordinates } from './variants.service';
 import {
   buildSearchText,
   removeProjection,
@@ -314,6 +315,86 @@ export async function reparentSubtree(
     .update(items)
     .set({ parentId: newParentId, updatedAt: new Date() })
     .where(and(eq(items.workspaceId, workspaceId), eq(items.id, itemId)));
+}
+
+// ---------------------------------------------------------------------------
+// variant generation
+// ---------------------------------------------------------------------------
+
+export interface VariantGenerationPlan {
+  itemTypeId: string;
+  drafts: ItemDraft[];
+  adding: number;
+  skippedExisting: number;
+  existingCount: number;
+}
+
+/**
+ * Loads everything `planVariantCoordinates` needs and turns its coordinates
+ * into `create` drafts for one change set. Axis values land in the variant's
+ * own `values` — the §2.5 axis pass reads them from there.
+ */
+export async function planVariantGeneration(
+  tx: Tx,
+  workspaceId: string,
+  modelId: string,
+  axisValues: Record<string, readonly string[]>,
+): Promise<VariantGenerationPlan> {
+  const [model] = await loadItems(tx, workspaceId, [modelId]);
+  if (!model) throw new AppError('NOT_FOUND', 'That item no longer exists.');
+
+  const [type] = await tx
+    .select({ variantAxes: itemTypes.variantAxes })
+    .from(itemTypes)
+    .where(and(eq(itemTypes.workspaceId, workspaceId), eq(itemTypes.id, model.itemTypeId)))
+    .limit(1);
+  if (!type) throw new AppError('NOT_FOUND', 'The item type no longer exists.');
+
+  const fields = await tx
+    .select()
+    .from(fieldsTable)
+    .where(
+      and(
+        eq(fieldsTable.workspaceId, workspaceId),
+        eq(fieldsTable.itemTypeId, model.itemTypeId),
+        isNull(fieldsTable.deletedAt),
+      ),
+    );
+
+  const existingVariants = await tx
+    .select({ variantAxisValues: items.variantAxisValues })
+    .from(items)
+    .where(
+      and(
+        eq(items.workspaceId, workspaceId),
+        eq(items.variantParentId, modelId),
+        isNull(items.archivedAt),
+      ),
+    );
+
+  const plan = planVariantCoordinates({
+    model,
+    variantAxes: type.variantAxes,
+    fields,
+    axisValues,
+    existingCoordinates: existingVariants.map((v) => v.variantAxisValues),
+  });
+
+  const drafts: ItemDraft[] = plan.coordinates.map((coordinate, i) => ({
+    title: plan.titles[i] as string,
+    itemTypeId: model.itemTypeId,
+    values: coordinate,
+    variantParentId: modelId,
+    variantAxisValues: coordinate,
+  }));
+
+  return {
+    itemTypeId: model.itemTypeId,
+    drafts,
+    adding: drafts.length,
+    skippedExisting: plan.skippedExisting,
+    existingCount: plan.existingCount,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@
  * instantly from cache while it revalidates.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Field } from '@/server/db/schema/itemTypes';
 import { api, setWorkspaceId, type ItemTypeWithSchema } from '@/lib/api';
@@ -55,9 +55,8 @@ export function GridWorkspace(props: GridWorkspaceProps) {
   const [detailItemId, setDetailItemId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    setWorkspaceId(props.workspaceId);
-  }, [props.workspaceId]);
+  // During render, not in an effect — an effect would race the first queries.
+  setWorkspaceId(props.workspaceId);
 
   const viewHash = useMemo(
     () => JSON.stringify({ sort, incompleteOnly, search }),

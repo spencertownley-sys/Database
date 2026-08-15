@@ -23,6 +23,7 @@ import { api, ApiError, type ItemDetail } from '@/lib/api';
 import { formatValue } from '@/server/validation/fieldTypes';
 import type { SelectOption } from '@/types/fields';
 import { CompletenessBar } from './CompletenessBar';
+import { GenerateVariantsDialog } from './GenerateVariantsDialog';
 import type { WorkspaceMemberOption } from '@/components/grid/editors/UserEditor';
 
 export interface ItemDetailPanelProps {
@@ -42,13 +43,19 @@ export function ItemDetailPanel(props: ItemDetailPanelProps) {
     () => new Set(props.fieldGroups.filter((g) => g.collapsedByDefault).map((g) => g.id)),
   );
   const [error, setError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [generated, setGenerated] = useState<number | null>(null);
   const fieldRefs = useRef(new Map<string, HTMLElement>());
 
   const queryKey = ['item-detail', props.itemId];
   const { data: item, isLoading } = useQuery({
     queryKey,
     queryFn: ({ signal }) =>
-      api.items.get(props.itemId, ['item_type', 'ancestors', 'children', 'tree_nodes'], signal),
+      api.items.get(
+        props.itemId,
+        ['item_type', 'ancestors', 'children', 'tree_nodes', 'variants'],
+        signal,
+      ),
   });
 
   const { data: activity } = useQuery({
@@ -189,6 +196,50 @@ export function ItemDetailPanel(props: ItemDetailPanelProps) {
             </section>
           )}
 
+          {!item.variantInfo && (item.itemType?.variantAxes?.length ?? 0) > 0 && (
+            <section className="border-b px-4 py-3" aria-label="Variants">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
+                  Variants {item.variants?.length ? `(${item.variants.length})` : ''}
+                </h3>
+                <button
+                  type="button"
+                  className="rounded border px-2 py-1 text-xs hover:bg-[var(--color-muted)]"
+                  onClick={() => setGenerating(true)}
+                >
+                  Generate variants
+                </button>
+              </div>
+              {generated !== null && (
+                <p role="status" className="mt-1.5 text-xs text-[var(--color-success)]">
+                  Created {generated} variant{generated === 1 ? '' : 's'}.
+                </p>
+              )}
+              {item.variants?.length ? (
+                <ul className="mt-1.5">
+                  {item.variants.map((variant) => (
+                    <li key={variant.id} className="flex items-center gap-2 py-1 text-sm">
+                      <span className="min-w-0 flex-1 truncate">{variant.title}</span>
+                      <span className="shrink-0 text-xs text-[var(--color-ink-subtle)]">
+                        {Object.entries(variant.variantAxisValues ?? {})
+                          .map(([k, v]) => selectOptionLabel(fieldByKey.get(k), v))
+                          .join(' · ')}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1.5 text-xs text-[var(--color-ink-subtle)]">
+                  One item, several versions. Variants share this item’s fields and differ only on{' '}
+                  {(item.itemType?.variantAxes ?? [])
+                    .map((key) => fieldByKey.get(key)?.label ?? key)
+                    .join(' and ')}
+                  .
+                </p>
+              )}
+            </section>
+          )}
+
           {grouped.map(({ group, fields }) => (
             <section key={group?.id ?? 'default'} className="border-b px-4 py-3">
               {group && (
@@ -264,6 +315,22 @@ export function ItemDetailPanel(props: ItemDetailPanelProps) {
               ))
             )}
           </section>
+          {generating && item.itemType && (
+            <GenerateVariantsDialog
+              itemId={item.id}
+              modelTitle={item.title}
+              axisFields={(item.itemType.variantAxes ?? [])
+                .map((key) => fieldByKey.get(key))
+                .filter((f): f is Field => Boolean(f))}
+              existingCount={item.variants?.length ?? 0}
+              onCreated={(created) => {
+                setGenerating(false);
+                setGenerated(created);
+                refresh();
+              }}
+              onClose={() => setGenerating(false)}
+            />
+          )}
         </>
       )}
     </div>
@@ -271,6 +338,13 @@ export function ItemDetailPanel(props: ItemDetailPanelProps) {
 
   if (props.fullPage) return body;
   return <div className="absolute inset-y-0 right-0 z-40 flex">{body}</div>;
+}
+
+/** Axis values are option ids; show the option's label where resolvable. */
+function selectOptionLabel(field: Field | undefined, optionId: string): string {
+  if (!field) return optionId;
+  const options = ((field.config ?? {}) as { options?: SelectOption[] }).options ?? [];
+  return options.find((o) => o.id === optionId)?.label ?? optionId;
 }
 
 function TitleEditor({ title, onCommit }: { title: string; onCommit: (title: string) => void }) {

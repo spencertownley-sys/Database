@@ -209,6 +209,130 @@ export function axisCoordinateKey(coordinate: Record<string, string>): string {
     .join('|');
 }
 
+export interface VariantCoordinatePlan {
+  /** New coordinates only — combinations that already exist are skipped. */
+  coordinates: Array<Record<string, string>>;
+  /** `"Model title (EMEA · L)"`, aligned with `coordinates` (UI/UX §9.4). */
+  titles: string[];
+  skippedExisting: number;
+  existingCount: number;
+}
+
+/**
+ * Expands the requested axis values into concrete variant coordinates,
+ * validating everything that can be validated without touching the database.
+ *
+ * The caller supplies the model, its type's declared axes, the schema, and
+ * the coordinates of the variants that already exist; this stays pure so the
+ * property suite can drive it directly.
+ */
+export function planVariantCoordinates(args: {
+  model: {
+    title: string;
+    parentId: string | null;
+    variantParentId: string | null;
+  };
+  variantAxes: readonly string[];
+  fields: ReadonlyArray<Pick<Field, 'key' | 'type' | 'config'>>;
+  axisValues: Record<string, readonly string[]>;
+  existingCoordinates: ReadonlyArray<Record<string, string> | null>;
+}): VariantCoordinatePlan {
+  const { model, variantAxes, fields, axisValues, existingCoordinates } = args;
+
+  if (variantAxes.length === 0) {
+    throw new AppError(
+      'NOT_VARIANT_ENABLED',
+      'This item type has no variant axes. Enable variants on the type and pick an axis field first.',
+    );
+  }
+  if (model.variantParentId !== null) {
+    throw new AppError('VARIANT_CONSTRAINT', 'A variant cannot have variants of its own.');
+  }
+  if (model.parentId !== null) {
+    // The v1 CHECK constraint: a variant model lives at the top level.
+    throw new AppError(
+      'VARIANT_CONSTRAINT',
+      'An item nested in the work hierarchy cannot become a variant model. Move it to the top level first.',
+    );
+  }
+
+  for (const key of Object.keys(axisValues)) {
+    if (!variantAxes.includes(key)) {
+      throw new AppError(
+        'INVALID_VARIANT_AXIS',
+        `"${key}" is not a variant axis of this item type.`,
+        { variantAxes: [...variantAxes] },
+      );
+    }
+  }
+
+  const fieldsByKey = new Map(fields.map((f) => [f.key, f]));
+  const optionLabels = new Map<string, Map<string, string>>();
+
+  // Every declared axis needs values — a variant with a partial coordinate
+  // would collide with the next generation over the missing axis.
+  const axes: AxisSpec[] = variantAxes.map((fieldKey) => {
+    const optionIds = axisValues[fieldKey];
+    if (!optionIds || optionIds.length === 0) {
+      throw new AppError(
+        'INVALID_VARIANT_AXIS',
+        `Pick at least one value for "${fieldKey}" — every axis needs a value on every variant.`,
+      );
+    }
+    const field = fieldsByKey.get(fieldKey);
+    if (!field || field.type !== 'select') {
+      throw new AppError(
+        'INVALID_VARIANT_AXIS',
+        `The axis field "${fieldKey}" is not a select field on this item type.`,
+      );
+    }
+    const options = new Map(
+      ((field.config as { options?: Array<{ id: string; label: string; archived?: boolean }> })
+        .options ?? [])
+        .filter((o) => !o.archived)
+        .map((o) => [o.id, o.label]),
+    );
+    for (const optionId of optionIds) {
+      if (!options.has(optionId)) {
+        throw new AppError(
+          'INVALID_VARIANT_AXIS',
+          `"${optionId}" is not an option of "${fieldKey}".`,
+          { fieldKey, optionId },
+        );
+      }
+    }
+    optionLabels.set(fieldKey, options);
+    return { fieldKey, optionIds: [...optionIds] };
+  });
+
+  const existing = new Set(
+    existingCoordinates.filter((c): c is Record<string, string> => c !== null).map(axisCoordinateKey),
+  );
+  const existingCount = existingCoordinates.length;
+
+  const combos = expandAxes(axes);
+  const coordinates = combos.filter((c) => !existing.has(axisCoordinateKey(c)));
+  const skippedExisting = combos.length - coordinates.length;
+
+  if (coordinates.length === 0) {
+    throw new AppError(
+      'VALIDATION_ERROR',
+      'Every requested combination already exists as a variant. Nothing to generate.',
+      { skippedExisting },
+    );
+  }
+  assertVariantLimit(existingCount, coordinates.length);
+
+  const titles = coordinates.map((coordinate) => {
+    const labels = variantAxes.map(
+      (key) => optionLabels.get(key)?.get(coordinate[key] as string) ?? coordinate[key],
+    );
+    return `${model.title} (${labels.join(' · ')})`;
+  });
+
+  return { coordinates, titles, skippedExisting, existingCount };
+}
+
 /**
  * Which variants a model write actually needs to touch.
  *

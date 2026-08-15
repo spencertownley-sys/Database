@@ -231,6 +231,17 @@ export const api = {
         parentId?: string | null;
       },
     ) => request<ItemDetail>(`/api/v1/items/${id}`, { method: 'PATCH', body }),
+
+    generateVariants: (
+      id: string,
+      body: { axisValues: Record<string, string[]>; preview: boolean },
+    ) =>
+      request<
+        ChangeSetWire & {
+          committed?: boolean;
+          generation: { adding: number; skippedExisting: number; existingCount: number };
+        }
+      >(`/api/v1/items/${id}/generate-variants`, { method: 'POST', body }),
   },
 
   trees: {

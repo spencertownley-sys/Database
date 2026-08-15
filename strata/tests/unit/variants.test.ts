@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeEffectiveValues,
   isInherited,
+  planVariantCoordinates,
   revertOverride,
   variantsAffectedByModelChange,
 } from '@/server/services/variants.service';
@@ -159,5 +160,84 @@ describe('variantsAffectedByModelChange', () => {
 
   it('a change to an unknown key reaches nobody', () => {
     expect(variantsAffectedByModelChange(['ghost'], byKey, variants, AXES)).toEqual([]);
+  });
+});
+
+describe('planVariantCoordinates', () => {
+  const model = { title: 'Q3 Launch', parentId: null, variantParentId: null };
+  const manyOptions = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `o${i}`, label: `Option ${i}`, order: i }));
+  const axisField = (key: string, count: number) => ({
+    key,
+    type: 'select' as const,
+    config: { options: manyOptions(count) },
+  });
+
+  it('expands the full grid, titles rows with option labels', () => {
+    const plan = planVariantCoordinates({
+      model,
+      variantAxes: ['region', 'size'],
+      fields: [axisField('region', 3), axisField('size', 2)],
+      axisValues: { region: ['o0', 'o1'], size: ['o0'] },
+      existingCoordinates: [],
+    });
+    expect(plan.coordinates).toHaveLength(2);
+    expect(plan.titles[0]).toBe('Q3 Launch (Option 0 · Option 0)');
+  });
+
+  it('enforces the 200-variant cap counting what already exists', () => {
+    const existing = Array.from({ length: 150 }, (_, i) => ({ region: `o${i}`, size: 'o0' }));
+    expect(() =>
+      planVariantCoordinates({
+        model,
+        variantAxes: ['region', 'size'],
+        fields: [axisField('region', 60), axisField('size', 2)],
+        // 60×2 = 120 new combos on top of 150 existing → over 200.
+        axisValues: { region: manyOptions(60).map((o) => o.id), size: ['o0', 'o1'] },
+        existingCoordinates: existing,
+      }),
+    ).toThrowError(/limit is 200/);
+  });
+
+  it('demands a value on every declared axis', () => {
+    expect(() =>
+      planVariantCoordinates({
+        model,
+        variantAxes: ['region', 'size'],
+        fields: [axisField('region', 3), axisField('size', 2)],
+        axisValues: { region: ['o0'] },
+        existingCoordinates: [],
+      }),
+    ).toThrowError(/every axis needs a value/);
+  });
+
+  it('refuses when every combination already exists', () => {
+    expect(() =>
+      planVariantCoordinates({
+        model,
+        variantAxes: ['region'],
+        fields: [axisField('region', 3)],
+        axisValues: { region: ['o0'] },
+        existingCoordinates: [{ region: 'o0' }],
+      }),
+    ).toThrowError(/already exists/);
+  });
+
+  it('skips archived options', () => {
+    expect(() =>
+      planVariantCoordinates({
+        model,
+        variantAxes: ['region'],
+        fields: [
+          {
+            key: 'region',
+            type: 'select' as const,
+            config: { options: [{ id: 'gone', label: 'Gone', order: 0, archived: true }] },
+          },
+        ],
+        axisValues: { region: ['gone'] },
+        existingCoordinates: [],
+      }),
+    ).toThrowError(/not an option/);
   });
 });

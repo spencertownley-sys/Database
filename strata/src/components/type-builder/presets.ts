@@ -244,6 +244,23 @@ const campaign: ItemTypePreset = {
       isIndexed: true,
       group: 'plan',
     },
+    {
+      // The declared variant axis (§3.2) — without this field, generating
+      // per-region variants of a campaign has nothing to expand over.
+      key: 'region',
+      label: 'Region',
+      type: 'select',
+      config: {
+        options: options(
+          ['na', 'North America'],
+          ['emea', 'EMEA'],
+          ['apac', 'APAC'],
+          ['latam', 'LATAM'],
+        ),
+      },
+      isIndexed: true,
+      group: 'plan',
+    },
     { key: 'audience', label: 'Audience', type: 'text', isSearchable: true, group: 'targeting' },
     { key: 'landing_page', label: 'Landing page', type: 'url', group: 'targeting' },
     {

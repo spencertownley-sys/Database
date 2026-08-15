@@ -11,7 +11,7 @@
  * just offering a button.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import type { Item } from '@/server/db/schema/items';
@@ -30,9 +30,8 @@ export function TreeManager(props: { workspaceId: string; workspaceSlug: string 
   const [deleting, setDeleting] = useState<NodeRow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setWorkspaceId(props.workspaceId);
-  }, [props.workspaceId]);
+  // During render, not in an effect — an effect would race the first queries.
+  setWorkspaceId(props.workspaceId);
 
   const { data: treesData } = useQuery({
     queryKey: ['trees', props.workspaceId],

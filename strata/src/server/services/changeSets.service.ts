@@ -591,6 +591,10 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
     const position =
       pendingByParent.get(parentKey)?.[cursor] ?? keyBetween(lastKeyByParent.get(parentKey) ?? null, null);
 
+    if (draft.variantParentId && draft.parentId) {
+      throw new AppError('VARIANT_CONSTRAINT', 'Variants live outside the work hierarchy.');
+    }
+
     entries.push({
       before: null,
       after: {
@@ -612,6 +616,41 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
       title: draft.title,
       skipped: false,
     });
+  }
+
+  // Creating variants makes their model a variant model, in the same change
+  // set: the flip rides as an update entry, so committing is atomic and undo
+  // restores the flag along with removing the variants.
+  const modelIds = [
+    ...new Set(
+      drafts.map((d) => d.variantParentId).filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (modelIds.length > 0) {
+    const models = await loadItems(plan.tx, plan.workspaceId, modelIds);
+    const modelById = new Map(models.map((m) => [m.id, m]));
+    for (const modelId of modelIds) {
+      const model = modelById.get(modelId);
+      if (!model) throw new AppError('NOT_FOUND', 'The variant model no longer exists.');
+      if (model.variantParentId !== null) {
+        throw new AppError('VARIANT_CONSTRAINT', 'A variant cannot have variants of its own.');
+      }
+      if (model.parentId !== null) {
+        throw new AppError(
+          'VARIANT_CONSTRAINT',
+          'An item nested in the work hierarchy cannot become a variant model. Move it to the top level first.',
+        );
+      }
+      if (!model.isVariantModel) {
+        const before = snapshotOf(model);
+        entries.push({
+          before,
+          after: { ...before, isVariantModel: true },
+          title: model.title,
+          skipped: false,
+        });
+      }
+    }
   }
 
   return entries;
