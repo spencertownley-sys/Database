@@ -12,10 +12,10 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { and, eq, isNull, or, gt, sql } from 'drizzle-orm';
-import type { Tx } from '@/server/db';
+import { eq, sql } from 'drizzle-orm';
+import { withWorkspace, withoutWorkspace } from '@/server/db';
 import { apiKeys, type ApiKeyScope } from '@/server/db/schema/apiKeys';
-import { workspaceMembers, type MemberRole } from '@/server/db/schema/workspaces';
+import { type MemberRole } from '@/server/db/schema/workspaces';
 import { AppError } from '@/server/lib/errors';
 
 const KEY_PREFIX = 'sk_strata_';
@@ -67,33 +67,42 @@ export interface ApiKeyIdentity {
  * API entirely. That is what contains the field-permission gap until
  * field-level permissions land.
  */
-export async function resolveApiKey(tx: Tx, presented: string): Promise<ApiKeyIdentity> {
+export async function resolveApiKey(presented: string): Promise<ApiKeyIdentity> {
   const hashed = hashApiKey(presented);
 
-  const rows = await tx
-    .select({
-      id: apiKeys.id,
-      workspaceId: apiKeys.workspaceId,
-      memberId: apiKeys.memberId,
-      hashedKey: apiKeys.hashedKey,
-      scopes: apiKeys.scopes,
-      role: workspaceMembers.role,
-      userId: workspaceMembers.userId,
-      memberStatus: workspaceMembers.status,
-    })
-    .from(apiKeys)
-    .innerJoin(workspaceMembers, eq(workspaceMembers.id, apiKeys.memberId))
-    .where(
-      and(
-        eq(apiKeys.hashedKey, hashed),
-        isNull(apiKeys.revokedAt),
-        or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, sql`now()`)),
-      ),
-    )
-    .limit(1);
+  // Goes through the SECURITY DEFINER function rather than a direct select:
+  // `api_keys` and `workspace_members` are both RLS-protected, and there is no
+  // workspace context yet — the key is how we learn which workspace this is.
+  // See `drizzle/migrations/0004_api_key_lookup.sql` for why that is safe.
+  const rows = await withoutWorkspace(async (tx) => {
+    const result = await tx.execute(
+      sql`select * from app_resolve_api_key(${hashed})`,
+    );
+    return [...result] as Array<{
+      api_key_id: string;
+      workspace_id: string;
+      member_id: string;
+      user_id: string | null;
+      member_role: MemberRole;
+      scopes: string[];
+      member_status: string;
+      hashed_key: string;
+    }>;
+  });
 
-  const row = rows[0];
-  if (!row) throw new AppError('UNAUTHENTICATED', 'That API key is not valid.');
+  const found = rows[0];
+  if (!found) throw new AppError('UNAUTHENTICATED', 'That API key is not valid.');
+
+  const row = {
+    id: found.api_key_id,
+    workspaceId: found.workspace_id,
+    memberId: found.member_id,
+    hashedKey: found.hashed_key,
+    scopes: found.scopes,
+    role: found.member_role,
+    userId: found.user_id,
+    memberStatus: found.member_status,
+  };
 
   // Constant-time compare even though the lookup already matched: the row was
   // found by an indexed equality, and this closes the timing channel that
@@ -118,7 +127,10 @@ export async function resolveApiKey(tx: Tx, presented: string): Promise<ApiKeyId
     );
   }
 
-  await tx.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, row.id));
+  // Back inside workspace context now that the key has told us which one.
+  await withWorkspace(row.workspaceId, (tx) =>
+    tx.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, row.id)),
+  );
 
   return {
     apiKeyId: row.id,

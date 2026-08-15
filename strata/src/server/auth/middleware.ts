@@ -9,7 +9,7 @@
  */
 
 import { and, eq, sql } from 'drizzle-orm';
-import { withoutWorkspace } from '@/server/db';
+import { withWorkspace, withoutWorkspace } from '@/server/db';
 import { guestScopes, workspaceMembers, workspaces, type Workspace } from '@/server/db/schema/workspaces';
 import { treeNodes } from '@/server/db/schema/trees';
 import { AppError } from '@/server/lib/errors';
@@ -49,7 +49,7 @@ export async function resolveRequestContext(
   const token = bearerToken(request);
 
   if (token && looksLikeApiKey(token)) {
-    const identity = await withoutWorkspace((tx) => resolveApiKey(tx, token));
+    const identity = await resolveApiKey(token);
     const workspace = await loadWorkspaceById(identity.workspaceId);
 
     if (slug && workspace.slug !== slug) {
@@ -94,7 +94,11 @@ export async function resolveSessionContext(
 ): Promise<{ user: SessionUser; workspace: Workspace; actor: Actor }> {
   const workspace = await loadWorkspaceBySlug(slug);
 
-  const membership = await withoutWorkspace(async (tx) => {
+  // `workspace_members` is a tenant table, so this must run *inside* the
+  // workspace context. Reading it through `withoutWorkspace` returns zero rows
+  // — RLS fails closed — and a legitimate owner is told they have no access.
+  // Resolving the slug first is what makes the context available to pin here.
+  const membership = await withWorkspace(workspace.id, async (tx) => {
     const rows = await tx
       .select()
       .from(workspaceMembers)
@@ -133,7 +137,7 @@ export async function resolveSessionContext(
 
   // Best-effort presence, and deliberately not awaited into the critical path
   // of every request beyond this single cheap update.
-  await withoutWorkspace((tx) =>
+  await withWorkspace(workspace.id, (tx) =>
     tx
       .update(workspaceMembers)
       .set({ lastSeenAt: new Date() })
@@ -147,7 +151,8 @@ async function loadGuestScopes(
   workspaceId: string,
   memberId: string,
 ): Promise<GuestScopeSummary[]> {
-  return withoutWorkspace(async (tx) => {
+  // `guest_scopes` and `tree_nodes` are both tenant tables.
+  return withWorkspace(workspaceId, async (tx) => {
     const rows = await tx
       .select({
         treeNodeId: guestScopes.treeNodeId,

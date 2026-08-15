@@ -40,6 +40,30 @@ export interface GridCellProps {
  * The callbacks must be stable (`useCallback` in the parent) or the memo is
  * defeated by prop identity alone.
  */
+/**
+ * A `user` field stores an id, which is correct for storage and useless on
+ * screen. Resolution happens here against the member list the grid already
+ * loaded once, rather than in `formatValue` — the server-side formatter has no
+ * access to workspace members, and giving it one would mean a lookup per cell.
+ */
+function formatUserAware(
+  type: Field['type'],
+  value: unknown,
+  config: Field['config'],
+  members: GridCellProps['members'],
+): string {
+  if (type !== 'user' || value === null || value === undefined) {
+    return formatValue(type, value, config);
+  }
+  const ids = Array.isArray(value) ? value.map(String) : [String(value)];
+  return ids
+    .map((id) => {
+      const member = members?.find((m) => m.id === id);
+      return member ? (member.name ?? member.email) : id;
+    })
+    .join(', ');
+}
+
 function GridCellImpl(props: GridCellProps) {
   const flags = useCellFlags(props.row, props.col);
   const isSelected = (flags & CellFlags.Selected) !== 0;
@@ -54,7 +78,7 @@ function GridCellImpl(props: GridCellProps) {
   const Editor = EDITORS[props.field.type];
   const display = props.invalid
     ? String(props.invalid.raw ?? '')
-    : formatValue(props.field.type, props.value, props.field.config);
+    : formatUserAware(props.field.type, props.value, props.field.config, props.members);
 
   const numeric =
     props.field.type === 'number' ||

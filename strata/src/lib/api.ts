@@ -66,7 +66,14 @@ export function setWorkspaceSlug(slug: string): void {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const url = new URL(path, typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+  // `URL` needs an absolute base to parse a relative path. The base is only
+  // ever a parsing scaffold — the request goes out same-origin using
+  // `pathname + search`. Stripping the base by string replacement instead
+  // silently mangles the URL whenever the real origin happens to share its
+  // prefix, which is every local development session.
+  const parseBase =
+    typeof window === 'undefined' ? 'http://strata.invalid' : window.location.origin;
+  const url = new URL(path, parseBase);
   if (workspaceSlug && !url.searchParams.has('workspace')) {
     url.searchParams.set('workspace', workspaceSlug);
   }
@@ -74,7 +81,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (options.idempotencyKey) headers['idempotency-key'] = options.idempotencyKey;
 
-  const response = await fetch(url.toString().replace('http://localhost', ''), {
+  const response = await fetch(`${url.pathname}${url.search}`, {
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
