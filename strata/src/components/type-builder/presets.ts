@@ -139,7 +139,7 @@ const clientProject: ItemTypePreset = {
   ],
   fields: [
     { key: 'client_name', label: 'Client', type: 'text', requiredForCompleteness: true, isSearchable: true, isIndexed: true, group: 'client' },
-    { key: 'account_lead', label: 'Account lead', type: 'user', isIndexed: true, group: 'client' },
+    { key: 'account_lead', label: 'Owner', type: 'user', isIndexed: true, group: 'client' },
     {
       key: 'status',
       label: 'Status',
@@ -174,7 +174,7 @@ const clientProject: ItemTypePreset = {
       group: 'commercial',
     },
     { key: 'start_date', label: 'Start date', type: 'date', requiredForCompleteness: true, isIndexed: true, group: 'delivery' },
-    { key: 'end_date', label: 'End date', type: 'date', isIndexed: true, group: 'delivery' },
+    { key: 'end_date', label: 'Due date', type: 'date', isIndexed: true, group: 'delivery' },
     { key: 'brief_url', label: 'Brief', type: 'url', group: 'client' },
     { key: 'scope', label: 'Scope of work', type: 'long_text', isSearchable: true, group: 'client' },
   ],
@@ -189,6 +189,7 @@ const campaign: ItemTypePreset = {
   color: 'amber',
   conceptHint:
     'Campaigns usually own a tree of deliverables — one per channel, per region, per format. Nest them rather than flattening the names.',
+  variantAxes: ['region'],
   groups: [
     { key: 'plan', label: 'Plan' },
     { key: 'targeting', label: 'Targeting' },
@@ -234,7 +235,7 @@ const campaign: ItemTypePreset = {
     },
     { key: 'owner', label: 'Owner', type: 'user', requiredForCompleteness: true, isIndexed: true, group: 'plan' },
     { key: 'launch_date', label: 'Launch date', type: 'date', requiredForCompleteness: true, isIndexed: true, group: 'plan' },
-    { key: 'end_date', label: 'End date', type: 'date', isIndexed: true, group: 'plan' },
+    { key: 'end_date', label: 'Due date', type: 'date', isIndexed: true, group: 'plan' },
     {
       key: 'budget',
       label: 'Budget',
@@ -278,6 +279,33 @@ const productVariant: ItemTypePreset = {
   variantAxes: ['region', 'size'],
   fields: [
     { key: 'sku', label: 'SKU', type: 'text', requiredForCompleteness: true, inheritance: 'variant', isIndexed: true, isSearchable: true, group: 'identity' },
+    {
+      key: 'category',
+      label: 'Category',
+      type: 'select',
+      config: {
+        options: options(['apparel', 'Apparel'], ['footwear', 'Footwear'], ['accessories', 'Accessories']),
+      },
+      inheritance: 'shared',
+      isIndexed: true,
+      group: 'identity',
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      type: 'select',
+      config: {
+        options: options(
+          ['draft', 'Draft', 'slate'],
+          ['active', 'Active', 'green'],
+          ['discontinued', 'Discontinued', 'slate'],
+        ),
+      },
+      inheritance: 'variant',
+      defaultValue: 'draft',
+      isIndexed: true,
+      group: 'identity',
+    },
     {
       key: 'region',
       label: 'Region',
@@ -356,10 +384,10 @@ const structuredRecord: ItemTypePreset = {
     { key: 'governance', label: 'Governance' },
   ],
   fields: [
-    { key: 'reference', label: 'Reference', type: 'text', requiredForCompleteness: true, isIndexed: true, isSearchable: true, group: 'summary' },
+    { key: 'reference', label: 'Reference ID', type: 'text', requiredForCompleteness: true, isIndexed: true, isSearchable: true, group: 'summary' },
     {
       key: 'category',
-      label: 'Category',
+      label: 'Record type',
       type: 'select',
       config: {
         options: options(
@@ -410,31 +438,20 @@ const structuredRecord: ItemTypePreset = {
 };
 
 /**
- * Blank is deliberately near-empty — it is the escape hatch for a shape none
- * of the others fit. It still ships with a status and notes, because an Item
- * Type whose only column is a title cannot be usefully opened in a grid.
+ * Blank is exactly what the card says: Title only (UI/UX §3.2). It is the
+ * escape hatch for a shape none of the others fit — shipping it with fields
+ * would mean every custom type starts by deleting somebody else's guesses.
  */
 const blank: ItemTypePreset = {
   key: 'blank',
   label: 'Item',
   pluralLabel: 'Items',
-  description: 'Start from almost nothing and add your own fields.',
+  description: 'Start from a title and add your own fields.',
   icon: 'square',
   color: 'slate',
   conceptHint: 'Add fields as you discover you need them — renaming one never touches stored data.',
-  groups: [{ key: 'details', label: 'Details' }],
-  fields: [
-    {
-      key: 'status',
-      label: 'Status',
-      type: 'select',
-      config: { options: STATUS_OPTIONS },
-      defaultValue: 'todo',
-      isIndexed: true,
-      group: 'details',
-    },
-    { key: 'notes', label: 'Notes', type: 'long_text', isSearchable: true, group: 'details' },
-  ],
+  groups: [],
+  fields: [],
 };
 
 export const ITEM_TYPE_PRESETS: ItemTypePreset[] = [

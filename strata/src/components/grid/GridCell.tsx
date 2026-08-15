@@ -94,7 +94,7 @@ function GridCellImpl(props: GridCellProps) {
       tabIndex={-1}
       style={{ width: props.width }}
       className={cn(
-        'relative shrink-0 border-b border-r px-2 text-sm leading-[var(--grid-row-height-normal)]',
+        'relative shrink-0 border-b border-r px-2 text-[length:var(--grid-font-size)] leading-[var(--grid-row-height-normal)]',
         'cell-text select-none',
         numeric && 'text-right tabular',
         isSelected && 'bg-[var(--color-accent-soft)]',

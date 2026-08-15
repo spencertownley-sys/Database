@@ -9,7 +9,7 @@
  * instantly from cache while it revalidates.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Field } from '@/server/db/schema/itemTypes';
 import { api, setWorkspaceId, type ItemTypeWithSchema } from '@/lib/api';
@@ -53,6 +53,7 @@ export function GridWorkspace(props: GridWorkspaceProps) {
   const [viewType, setViewType] = useState<ViewType>('grid');
   const [boardGroupFieldKey, setBoardGroupFieldKey] = useState<string | null>(null);
   const [detailItemId, setDetailItemId] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setWorkspaceId(props.workspaceId);
@@ -129,6 +130,7 @@ export function GridWorkspace(props: GridWorkspaceProps) {
         </span>
 
         <input
+          ref={searchRef}
           className="ml-3 w-56 rounded-[var(--radius-md)] border px-2 py-1 text-sm outline-none focus:border-[var(--color-accent)]"
           placeholder="Search…"
           value={search}
@@ -191,6 +193,8 @@ export function GridWorkspace(props: GridWorkspaceProps) {
             onPinnedChange={setPinnedFieldKeys}
             onFieldOrderChange={setFieldOrder}
             onOpenDetail={setDetailItemId}
+            onFocusFilter={() => searchRef.current?.focus()}
+            onCommandPalette={() => searchRef.current?.focus()}
             onDataChanged={refetch}
             onToast={pushToast}
           />
