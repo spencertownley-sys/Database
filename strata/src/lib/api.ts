@@ -316,15 +316,43 @@ export const api = {
   },
 
   activity: {
-    list: (params: { itemId?: string; limit?: number; cursor?: string }, signal?: AbortSignal) => {
+    list: (
+      params: {
+        itemId?: string;
+        actorId?: string;
+        operation?: string;
+        limit?: number;
+        cursor?: string;
+      },
+      signal?: AbortSignal,
+    ) => {
       const search = new URLSearchParams();
       if (params.itemId) search.set('item_id', params.itemId);
+      if (params.actorId) search.set('actor_id', params.actorId);
+      if (params.operation) search.set('operation', params.operation);
       if (params.limit) search.set('limit', String(params.limit));
       if (params.cursor) search.set('cursor', params.cursor);
       return request<Collection<ActivityEntry>>(`/api/v1/change-sets?${search.toString()}`, {
         signal,
       });
     },
+  },
+
+  notifications: {
+    list: (params: { unreadOnly?: boolean; limit?: number } = {}, signal?: AbortSignal) => {
+      const search = new URLSearchParams();
+      if (params.unreadOnly) search.set('unread_only', 'true');
+      if (params.limit) search.set('limit', String(params.limit));
+      return request<Collection<NotificationWire> & { unreadCount: number }>(
+        `/api/v1/notifications?${search.toString()}`,
+        { signal },
+      );
+    },
+    markRead: (target: { ids: string[] } | { all: true }) =>
+      request<{ markedRead: number }>('/api/v1/notifications/read', {
+        method: 'POST',
+        body: target,
+      }),
   },
 
   changeSets: {
@@ -502,6 +530,16 @@ export interface ImportProfileWire {
   name: string;
   mapping: Record<string, string>;
   matchKey: string | null;
+}
+
+export interface NotificationWire {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  href: string | null;
+  readAt: string | null;
+  createdAt: string;
 }
 
 export interface ViewConfigWire {

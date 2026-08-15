@@ -11,6 +11,8 @@ import {
   commitChangeSet,
   previewChangeSet,
 } from '@/server/services/changeSets.service';
+import { emitCommitted, emitImportCompleted } from '@/server/lib/webhookEmit';
+import { createNotification } from '@/server/services/notifications.service';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +31,7 @@ export async function POST(
     async ({ context }) => {
       assertCan(context.actor, 'import.commit', { kind: 'import' });
 
-      return withWorkspace(context.workspace.id, async (tx) => {
+      const outcome = await withWorkspace(context.workspace.id, async (tx) => {
         const job = await getImportJob(tx, context.workspace.id, id);
         const drafts = await buildImportDrafts(tx, context.workspace.id, job);
 
@@ -48,12 +50,33 @@ export async function POST(
         const result = await commitChangeSet(tx, changeContext, changeSet.id);
         const committed = await markCommitted(tx, context.workspace.id, job.id, changeSet.id);
 
-        return {
-          ...shapeImportJob(committed, context.workspace.id),
-          appliedCount: result.appliedCount,
-          skippedCount: result.skippedCount,
-        };
+        if (context.actor.userId) {
+          await createNotification(tx, context.workspace.id, {
+            userId: context.actor.userId,
+            kind: 'import_completed',
+            title: `Import of ${job.fileName} finished`,
+            body: `${result.appliedCount.toLocaleString()} items written. Undo is available for 24 hours.`,
+            context: { importId: job.id, changeSetId: changeSet.id },
+          });
+        }
+
+        return { job: committed, changeSet: result.changeSet, result };
       });
+
+      emitCommitted(context.workspace.id, outcome.changeSet, {
+        appliedCount: outcome.result.appliedCount,
+      });
+      emitImportCompleted(context.workspace.id, {
+        importId: outcome.job.id,
+        changeSetId: outcome.changeSet.id,
+        rowCount: outcome.job.rowCount,
+      });
+
+      return {
+        ...shapeImportJob(outcome.job, context.workspace.id),
+        appliedCount: outcome.result.appliedCount,
+        skippedCount: outcome.result.skippedCount,
+      };
     },
     { limit: 'write' },
   );

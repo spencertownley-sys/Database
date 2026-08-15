@@ -5,6 +5,7 @@ import { withWorkspace } from '@/server/db';
 import { getSessionUser } from '@/server/auth/session';
 import { resolveSessionContext } from '@/server/auth/middleware';
 import { Providers } from '@/app/providers';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { AppError } from '@/server/lib/errors';
 import { checkDatabaseReadiness } from '@/server/db/readiness';
 import { SetupHelp } from '@/components/SetupHelp';
@@ -62,6 +63,7 @@ export default async function WorkspaceLayout({
             {context.actor.role}
           </span>
           <span className="ml-auto text-xs text-[var(--color-ink-subtle)]">{user.email}</span>
+          <NotificationBell workspaceId={context.workspace.id} workspaceSlug={slug} />
         </header>
 
         <div className="flex min-h-0 flex-1">
@@ -84,6 +86,14 @@ export default async function WorkspaceLayout({
                   className="flex items-center rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
                 >
                   Import
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href={`/w/${slug}/activity`}
+                  className="flex items-center rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
+                >
+                  Activity
                 </Link>
               </li>
             </ul>

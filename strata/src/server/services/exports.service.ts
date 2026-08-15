@@ -28,6 +28,7 @@ import { searchProvider } from '@/server/search/PostgresSearchProvider';
 import { formatValue } from '@/server/validation/fieldTypes';
 import type { FilterGroup, SortSpec } from '@/types/filters';
 import { guardCsvCell } from './imports.service';
+import { createNotification } from './notifications.service';
 
 export const MAX_EXPORT_ROWS = 50_000;
 const PAGE_SIZE = 500;
@@ -146,6 +147,18 @@ export async function runExport(
     })
     .returning();
   if (!job) throw new AppError('INTERNAL_ERROR', 'The export was not recorded.');
+
+  if (userId) {
+    // The file link expires in an hour; the notification survives and its
+    // href re-mints a token on read (§8: signed URLs are minted, not stored).
+    await createNotification(tx, workspaceId, {
+      userId,
+      kind: 'export_ready',
+      title: 'Your export is ready',
+      body: `${rows.length.toLocaleString()} rows. The download link lasts one hour.`,
+      context: { exportId: job.id },
+    });
+  }
 
   return { job, downloadUrl: downloadUrlFor(job) };
 }

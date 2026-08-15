@@ -70,6 +70,7 @@ import {
   type ItemSnapshot,
   type LoadedItem,
 } from './items.service';
+import { createNotification } from './notifications.service';
 import { coerceValue, type CoerceContext } from '@/server/validation/fieldTypes';
 import type { InvalidValues } from '@/server/db/schema/items';
 
@@ -1063,6 +1064,27 @@ export async function commitChangeSet(
   );
 
   await refreshItemTypeCounts(tx, ctx.workspaceId, [...typeIds]);
+
+  // Newly assigned people find out in-app. Ids and titles only — a
+  // notification row must never carry item field values.
+  if (ctx.source !== 'undo') {
+    for (const change of changes) {
+      const assignee = change.after?.assigneeId;
+      if (assignee && assignee !== change.before?.assigneeId && assignee !== ctx.actor.userId) {
+        await createNotification(tx, ctx.workspaceId, {
+          userId: assignee,
+          kind: 'assigned',
+          title: `You were assigned “${change.after?.title ?? 'an item'}”`,
+          href: change.after ? `/items/${change.after.id}` : undefined,
+          context: {
+            itemId: change.after?.id ?? '',
+            changeSetId,
+            ...(ctx.actor.userId ? { actorId: ctx.actor.userId } : {}),
+          },
+        });
+      }
+    }
+  }
 
   const [committed] = await tx
     .update(changeSets)

@@ -1,6 +1,7 @@
 import { withWorkspace } from '@/server/db';
 import { handle } from '@/server/lib/route';
 import { undoChangeSet } from '@/server/services/changeSets.service';
+import { emitUndone } from '@/server/lib/webhookEmit';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,9 +18,9 @@ export async function POST(
 
   return handle(
     request,
-    async ({ context }) =>
-      withWorkspace(context.workspace.id, async (tx) => {
-        const result = await undoChangeSet(
+    async ({ context }) => {
+      const result = await withWorkspace(context.workspace.id, (tx) =>
+        undoChangeSet(
           tx,
           {
             workspaceId: context.workspace.id,
@@ -27,17 +28,19 @@ export async function POST(
             source: 'undo',
           },
           id,
-        );
-        // §5: the undo response names both sets and reports what was restored.
-        return {
-          undoChangeSetId: result.changeSet.id,
-          originalChangeSetId: id,
-          status: result.changeSet.status,
-          itemCount: result.changeSet.itemCount,
-          restored: result.appliedCount,
-          variantsPropagated: result.variantsPropagated,
-        };
-      }),
+        ),
+      );
+      emitUndone(context.workspace.id, id, result.changeSet.id);
+      // §5: the undo response names both sets and reports what was restored.
+      return {
+        undoChangeSetId: result.changeSet.id,
+        originalChangeSetId: id,
+        status: result.changeSet.status,
+        itemCount: result.changeSet.itemCount,
+        restored: result.appliedCount,
+        variantsPropagated: result.variantsPropagated,
+      };
+    },
     { limit: 'bulk' },
   );
 }

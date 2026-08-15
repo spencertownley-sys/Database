@@ -12,6 +12,7 @@ import {
 } from '@/server/services/changeSets.service';
 import { assertCan } from '@/server/services/permissions.service';
 import { shapeChangeSet } from '@/server/lib/changeSetWire';
+import { emitCommitted } from '@/server/lib/webhookEmit';
 import { changeSetInputSchema } from '@/server/validation/schemas';
 import type { ChangeTarget } from '@/server/db/schema/changeSets';
 
@@ -144,6 +145,10 @@ export async function POST(request: Request): Promise<Response> {
         }
 
         const result = await commitChangeSet(tx, changeContext, changeSet.id);
+        emitCommitted(context.workspace.id, result.changeSet, {
+          appliedCount: result.appliedCount,
+          itemId: input.target.itemIds?.[0] ?? null,
+        });
         return {
           ...shapeChangeSet(result.changeSet),
           requiresAsyncCommit: false,
