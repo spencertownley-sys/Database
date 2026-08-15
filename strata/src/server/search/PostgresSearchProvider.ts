@@ -239,6 +239,27 @@ function buildWhere(
     );
   }
 
+  if (query.guestScopes) {
+    // A guest's whole result set is scoped, not post-filtered: an item is
+    // visible only when one of its tree nodes sits inside a granted branch.
+    // Fail closed — an empty grant list matches nothing.
+    if (query.guestScopes.length === 0) {
+      parts.push(sql`false`);
+    } else {
+      const branches = query.guestScopes.map((scope) =>
+        scope.includeDescendants
+          ? sql`tn.path <@ ${scope.treeNodePath}::ltree`
+          : sql`tn.path = ${scope.treeNodePath}::ltree`,
+      );
+      parts.push(sql`exists (
+        select 1 from item_tree_nodes itn
+        join tree_nodes tn on tn.id = itn.tree_node_id
+        where itn.item_id = ${itemRef}.id
+          and (${sql.join(branches, sql` or `)})
+      )`);
+    }
+  }
+
   if (query.search && query.search.trim()) {
     // ILIKE '%q%' is served by the gin_trgm_ops index on search_text, which is
     // why search_text exists as a denormalised column at all.

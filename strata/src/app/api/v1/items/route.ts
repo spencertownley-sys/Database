@@ -18,7 +18,19 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: Request): Promise<Response> {
   return handle(request, async ({ context }) => {
-    assertCan(context.actor, 'item.read', { kind: 'item', treeNodePaths: [] });
+    // Guests skip the per-item check: their whole result set is scoped by a
+    // WHERE clause instead (fail-closed — no grants, no rows). Everyone else
+    // goes through can() as usual.
+    const guestScopes =
+      context.actor.role === 'guest'
+        ? (context.actor.guestScopes ?? []).map((s) => ({
+            treeNodePath: s.treeNodePath,
+            includeDescendants: s.includeDescendants,
+          }))
+        : undefined;
+    if (!guestScopes) {
+      assertCan(context.actor, 'item.read', { kind: 'item', treeNodePaths: [] });
+    }
     const query = parseQuery(request, listItemsQuerySchema);
 
     return withWorkspace(context.workspace.id, async (tx) => {
@@ -56,6 +68,7 @@ export async function GET(request: Request): Promise<Response> {
           incompleteOnly: query.incompleteOnly,
           // §4: variants are in the result set unless explicitly excluded.
           includeVariants: query.includeVariants ?? true,
+          guestScopes,
           limit: query.limit,
           cursor: query.cursor,
         },

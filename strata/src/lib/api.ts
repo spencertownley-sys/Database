@@ -370,6 +370,31 @@ export const api = {
       request<{ discarded: true }>(`/api/v1/change-sets/${id}`, { method: 'DELETE' }),
   },
 
+  views: {
+    list: (itemTypeId?: string, signal?: AbortSignal) =>
+      request<Collection<ViewWire>>(
+        `/api/v1/views${itemTypeId ? `?item_type_id=${itemTypeId}` : ''}`,
+        { signal },
+      ),
+    create: (body: {
+      itemTypeId: string;
+      name: string;
+      type?: 'grid' | 'list' | 'board';
+      visibility?: 'private' | 'workspace' | 'shared';
+      config?: ViewConfigWire;
+    }) => request<ViewWire>('/api/v1/views', { method: 'POST', body }),
+    update: (
+      id: string,
+      body: {
+        name?: string;
+        visibility?: 'private' | 'workspace' | 'shared';
+        config?: ViewConfigWire;
+      },
+    ) => request<ViewWire>(`/api/v1/views/${id}`, { method: 'PATCH', body }),
+    delete: (id: string) =>
+      request<{ deleted: true }>(`/api/v1/views/${id}`, { method: 'DELETE' }),
+  },
+
   imports: {
     create: (file: File, itemTypeId: string, profileId?: string) => {
       const form = new FormData();
@@ -477,4 +502,29 @@ export interface ImportProfileWire {
   name: string;
   mapping: Record<string, string>;
   matchKey: string | null;
+}
+
+export interface ViewConfigWire {
+  filter?: FilterGroup;
+  sort?: SortSpec[];
+  search?: string;
+  incompleteOnly?: boolean;
+  visibleFieldKeys?: string[];
+  columnWidths?: Record<string, number>;
+  pinnedFieldKeys?: string[];
+  boardGroupFieldKey?: string;
+}
+
+export interface ViewWire {
+  id: string;
+  itemTypeId: string;
+  type: 'grid' | 'list' | 'board';
+  name: string;
+  description: string | null;
+  visibility: 'private' | 'workspace' | 'shared';
+  config: ViewConfigWire;
+  isDefault: boolean;
+  ownerId: string | null;
+  shareToken: string | null;
+  shareUrl: string | null;
 }

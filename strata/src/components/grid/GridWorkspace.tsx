@@ -15,6 +15,7 @@ import type { Field } from '@/server/db/schema/itemTypes';
 import { api, setWorkspaceId, type ItemTypeWithSchema } from '@/lib/api';
 import type { SortSpec } from '@/types/filters';
 import { Grid } from './Grid';
+import { SavedViews } from './SavedViews';
 import { ListView } from '@/components/list/ListView';
 import { BoardView } from '@/components/board/BoardView';
 import { ItemDetailPanel } from '@/components/item-detail/ItemDetailPanel';
@@ -124,6 +125,30 @@ export function GridWorkspace(props: GridWorkspaceProps) {
             </button>
           ))}
         </nav>
+        <SavedViews
+          itemTypeId={props.itemType.id}
+          currentType={viewType}
+          currentConfig={() => ({
+            sort,
+            search: search || undefined,
+            incompleteOnly: incompleteOnly || undefined,
+            columnWidths: Object.keys(columnWidths).length ? columnWidths : undefined,
+            pinnedFieldKeys: pinnedFieldKeys.length ? pinnedFieldKeys : undefined,
+            visibleFieldKeys: fieldOrder,
+            boardGroupFieldKey: boardGroupFieldKey ?? undefined,
+          })}
+          onApply={(view) => {
+            setViewType(view.type);
+            setSort(view.config.sort ?? [{ field: '$title', direction: 'asc' }]);
+            setSearch(view.config.search ?? '');
+            setIncompleteOnly(view.config.incompleteOnly ?? false);
+            setColumnWidths(view.config.columnWidths ?? {});
+            setPinnedFieldKeys(view.config.pinnedFieldKeys ?? []);
+            setFieldOrder(view.config.visibleFieldKeys);
+            setBoardGroupFieldKey(view.config.boardGroupFieldKey ?? null);
+          }}
+        />
+
         <span className="text-xs text-[var(--color-ink-subtle)]">
           {data?.meta.total != null ? `${data.meta.total} total` : ''}
         </span>

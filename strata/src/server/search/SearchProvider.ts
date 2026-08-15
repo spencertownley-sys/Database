@@ -32,6 +32,11 @@ export interface SearchQuery {
   /** Restrict to a category tree node. */
   treeNodeId?: string;
   treeIncludeDescendants?: boolean;
+  /**
+   * Guest visibility: only items in one of these granted branches. Present
+   * (even empty) means the caller is a guest — empty matches nothing.
+   */
+  guestScopes?: Array<{ treeNodePath: string; includeDescendants: boolean }>;
   incompleteOnly?: boolean;
   /** Variants are hidden by default; the grid shows them under their model. */
   includeVariants?: boolean;
