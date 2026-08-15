@@ -29,6 +29,8 @@
   --color-warning-soft: oklch(96% 0.05 85);
   --color-danger: oklch(56% 0.19 25);
   --color-danger-soft: oklch(95% 0.04 25);
+  /* The 100% stop of the completeness ramp (UI/UX §2). */
+  --color-completeness-done: oklch(52% 0.14 155);
 
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,

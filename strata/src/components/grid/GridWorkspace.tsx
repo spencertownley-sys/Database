@@ -15,7 +15,12 @@ import type { Field } from '@/server/db/schema/itemTypes';
 import { api, setWorkspaceId, type ItemTypeWithSchema } from '@/lib/api';
 import type { SortSpec } from '@/types/filters';
 import { Grid } from './Grid';
+import { ListView } from '@/components/list/ListView';
+import { BoardView } from '@/components/board/BoardView';
+import { ItemDetailPanel } from '@/components/item-detail/ItemDetailPanel';
 import type { WorkspaceMemberOption } from './editors/UserEditor';
+
+type ViewType = 'grid' | 'list' | 'board';
 
 export interface GridWorkspaceProps {
   workspaceSlug: string;
@@ -43,6 +48,11 @@ export function GridWorkspace(props: GridWorkspaceProps) {
   const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Switching view type preserves filters and sort (UI/UX §3.3): the three
+  // views render the same query state, so the switch is purely presentational.
+  const [viewType, setViewType] = useState<ViewType>('grid');
+  const [boardGroupFieldKey, setBoardGroupFieldKey] = useState<string | null>(null);
+  const [detailItemId, setDetailItemId] = useState<string | null>(null);
 
   useEffect(() => {
     setWorkspaceId(props.workspaceId);
@@ -67,9 +77,6 @@ export function GridWorkspace(props: GridWorkspaceProps) {
           sort,
           incompleteOnly: incompleteOnly || undefined,
           q: search || undefined,
-          // The grid nests variants under their model row, so loose variant
-          // rows are excluded here even though the API defaults them in.
-          includeVariants: false,
           limit: 200,
         },
         signal,
@@ -99,6 +106,24 @@ export function GridWorkspace(props: GridWorkspaceProps) {
     <div className="relative flex h-full min-h-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b bg-[var(--color-surface)] px-3">
         <h1 className="text-sm font-semibold">{props.itemType.pluralLabel ?? props.itemType.label}</h1>
+
+        <nav aria-label="View type" className="ml-2 flex rounded-[var(--radius-md)] border p-0.5">
+          {(['grid', 'list', 'board'] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={viewType === kind}
+              className={`rounded px-2 py-0.5 text-xs capitalize ${
+                viewType === kind
+                  ? 'bg-[var(--color-accent)] text-white'
+                  : 'text-[var(--color-ink-muted)] hover:bg-[var(--color-muted)]'
+              }`}
+              onClick={() => setViewType(kind)}
+            >
+              {kind}
+            </button>
+          ))}
+        </nav>
         <span className="text-xs text-[var(--color-ink-subtle)]">
           {data?.meta.total != null ? `${data.meta.total} total` : ''}
         </span>
@@ -130,6 +155,26 @@ export function GridWorkspace(props: GridWorkspaceProps) {
           </p>
         ) : items.length === 0 ? (
           <EmptyState typeName={props.itemType.label} incompleteOnly={incompleteOnly} />
+        ) : viewType === 'list' ? (
+          <ListView
+            items={items}
+            fields={fields}
+            onOpenDetail={setDetailItemId}
+            onDataChanged={refetch}
+            onToast={pushToast}
+          />
+        ) : viewType === 'board' ? (
+          <BoardView
+            items={items}
+            fields={fields}
+            itemTypeId={props.itemType.id}
+            members={props.members}
+            groupFieldKey={boardGroupFieldKey}
+            onGroupFieldChange={setBoardGroupFieldKey}
+            onOpenDetail={setDetailItemId}
+            onDataChanged={refetch}
+            onToast={pushToast}
+          />
         ) : (
           <Grid
             items={items}
@@ -145,9 +190,20 @@ export function GridWorkspace(props: GridWorkspaceProps) {
             onColumnWidthChange={setColumnWidths}
             onPinnedChange={setPinnedFieldKeys}
             onFieldOrderChange={setFieldOrder}
-            onOpenDetail={() => pushToast({ message: 'The detail panel is not built yet.' })}
+            onOpenDetail={setDetailItemId}
             onDataChanged={refetch}
             onToast={pushToast}
+          />
+        )}
+
+        {detailItemId && (
+          <ItemDetailPanel
+            itemId={detailItemId}
+            fields={fields}
+            fieldGroups={props.itemType.fieldGroups}
+            members={props.members}
+            onClose={() => setDetailItemId(null)}
+            onDataChanged={refetch}
           />
         )}
       </div>

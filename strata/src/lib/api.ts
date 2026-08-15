@@ -58,6 +58,41 @@ export interface Collection<T> {
   meta: CollectionMeta;
 }
 
+/** `GET /items/:id` with expansions — the detail panel's shape. */
+export interface ItemDetail extends Item {
+  itemType?: ItemType | null;
+  parent?: Item | null;
+  ancestors?: Array<{ id: string; title: string }>;
+  children?: Array<{ id: string; title: string; completenessPct: number }>;
+  variants?: Array<{ id: string; title: string; variantAxisValues: Record<string, string> | null }>;
+  treeNodes?: Array<{ id: string; label: string; treeId: string }>;
+  variantInfo?: {
+    variantParentId: string;
+    variantParentTitle: string | null;
+    axisValues: Record<string, string>;
+    inheritedFields: string[];
+    overriddenFields: string[];
+    propagating: boolean;
+  };
+  meta?: { changeSetId: string | null };
+}
+
+/** One row of the activity feed (`GET /change-sets`). */
+export interface ActivityEntry {
+  id: string;
+  operation: ChangeOperation;
+  status: ChangeSetStatus;
+  source: string;
+  actorId: string | null;
+  actorName: string | null;
+  itemCount: number;
+  skippedCount: number;
+  summary: ChangeSummary;
+  committedAt: string | null;
+  undoneByChangeSetId: string | null;
+  createdAt: string;
+}
+
 /** The §5 change-set wire shape, camelCased by the client boundary. */
 export interface ChangeSetWire {
   id: string;
@@ -179,6 +214,34 @@ export const api = {
   items: {
     list: (params: ListItemsParams, signal?: AbortSignal) =>
       request<Collection<Item>>(`/api/v1/items?${toQuery(params)}`, { signal }),
+
+    get: (id: string, expand?: string[], signal?: AbortSignal) =>
+      request<ItemDetail>(
+        `/api/v1/items/${id}${expand?.length ? `?expand=${expand.join(',')}` : ''}`,
+        { signal },
+      ),
+
+    patch: (
+      id: string,
+      body: {
+        title?: string;
+        values?: Record<string, unknown>;
+        revertFields?: string[];
+        parentId?: string | null;
+      },
+    ) => request<ItemDetail>(`/api/v1/items/${id}`, { method: 'PATCH', body }),
+  },
+
+  activity: {
+    list: (params: { itemId?: string; limit?: number; cursor?: string }, signal?: AbortSignal) => {
+      const search = new URLSearchParams();
+      if (params.itemId) search.set('item_id', params.itemId);
+      if (params.limit) search.set('limit', String(params.limit));
+      if (params.cursor) search.set('cursor', params.cursor);
+      return request<Collection<ActivityEntry>>(`/api/v1/change-sets?${search.toString()}`, {
+        signal,
+      });
+    },
   },
 
   changeSets: {
