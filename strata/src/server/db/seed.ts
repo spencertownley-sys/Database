@@ -35,6 +35,7 @@ import { itemFieldIndex, items } from './schema/items';
 import { itemTreeNodes, treeNodes, trees } from './schema/trees';
 import { views } from './schema/views';
 import { computeCompleteness } from '../services/completeness.service';
+import { ALWAYS_INDEXED_TYPES } from '../services/fields.service';
 import { computeEffectiveValues, ownEffectiveValues } from '../services/variants.service';
 import { buildSearchText } from '../search/projection';
 import { toIndexValue } from '../validation/fieldTypes';
@@ -272,7 +273,7 @@ async function seedItemTypeSchema(
     requiredForCompleteness: f.requiredForCompleteness ?? false,
     defaultValue: f.defaultValue ?? null,
     inheritance: f.inheritance ?? ('variant' as const),
-    isIndexed: f.isIndexed ?? false,
+    isIndexed: ALWAYS_INDEXED_TYPES.has(f.type) || (f.isIndexed ?? false),
     isSearchable: f.isSearchable ?? false,
     position: fieldOrder[i] as string,
     createdBy: actorId,

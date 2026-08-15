@@ -9,7 +9,7 @@
  * perform most casually.
  */
 
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Tx } from '@/server/db';
 import { fields as fieldsTable, type Field } from '@/server/db/schema/itemTypes';
 import { items } from '@/server/db/schema/items';
@@ -23,50 +23,21 @@ import { requiredFieldNeedsAcknowledgement } from './completeness.service';
 import { slugifyKey, assertValidKey } from './itemTypes.service';
 
 /**
- * Turns on `is_indexed` for fields a query just referenced, and enqueues a
- * backfill for their existing values.
- *
- * Indexing every field up front triples write cost for fields nobody ever
- * filters. Indexing on first use costs one extra write the first time a field
- * is filtered and nothing thereafter.
+ * Field types that are always projected into `item_field_index` (Tech Spec
+ * §2.2): they are overwhelmingly what people filter and group by, and a select
+ * column that cannot back a board view is broken on arrival. Everything else
+ * starts un-indexed and is enabled explicitly — a filter on an un-indexed
+ * field returns FIELD_NOT_FILTERABLE with the PATCH that fixes it, never a
+ * silent inline backfill (API Design §4.1).
  */
-export async function ensureFieldsIndexed(
-  tx: Tx,
-  workspaceId: string,
-  fieldKeys: readonly string[],
-  liveFields: readonly Field[],
-): Promise<string[]> {
-  if (fieldKeys.length === 0) return [];
-
-  const byKey = new Map(liveFields.map((f) => [f.key, f]));
-  const toIndex = fieldKeys
-    .map((key) => byKey.get(key))
-    .filter((f): f is Field => f !== undefined && !f.isIndexed);
-
-  if (toIndex.length === 0) return [];
-
-  await tx
-    .update(fieldsTable)
-    .set({ isIndexed: true, updatedAt: new Date() })
-    .where(
-      and(
-        eq(fieldsTable.workspaceId, workspaceId),
-        inArray(
-          fieldsTable.id,
-          toIndex.map((f) => f.id),
-        ),
-      ),
-    );
-
-  // Backfill inline. Above a few thousand items this is the `fieldBackfill`
-  // job's work; the sync path exists so the very first filter on a small
-  // workspace returns correct results immediately rather than an empty grid.
-  for (const field of toIndex) {
-    await backfillField(tx, workspaceId, field);
-  }
-
-  return toIndex.map((f) => f.id);
-}
+export const ALWAYS_INDEXED_TYPES: ReadonlySet<FieldType> = new Set([
+  'select',
+  'multi_select',
+  'date',
+  'datetime',
+  'user',
+  'checkbox',
+]);
 
 /**
  * Populates `item_field_index` for one field across every item of its type.
@@ -139,6 +110,7 @@ export interface CreateFieldInput {
   helpText?: string;
   fieldGroupId?: string | null;
   defaultValue?: unknown;
+  isIndexed?: boolean;
   isSearchable?: boolean;
   acknowledgeIncomplete?: boolean;
 }
@@ -199,6 +171,7 @@ export async function createField(
       requiredForCompleteness: input.requiredForCompleteness ?? false,
       defaultValue: input.defaultValue ?? null,
       inheritance: input.inheritance ?? 'variant',
+      isIndexed: ALWAYS_INDEXED_TYPES.has(input.type) || (input.isIndexed ?? false),
       isSearchable: input.isSearchable ?? false,
       position: position as string,
       createdBy: actorId,
@@ -338,17 +311,25 @@ export async function updateField(
     }
   }
 
+  const nextType = (patch.type ?? field.type) as FieldType;
+  // Always-on types cannot be un-indexed (Tech Spec §2.2); anything else is
+  // whatever the caller chose, defaulting to its current setting.
+  const nextIndexed = ALWAYS_INDEXED_TYPES.has(nextType)
+    ? true
+    : (patch.isIndexed ?? field.isIndexed);
+
   const [updated] = await tx
     .update(fieldsTable)
     .set({
       label: patch.label ?? field.label,
-      type: (patch.type ?? field.type) as FieldType,
+      type: nextType,
       config: (patch.config ?? field.config) as FieldConfig,
       helpText: patch.helpText ?? field.helpText,
       requiredForCompleteness:
         patch.requiredForCompleteness ?? field.requiredForCompleteness,
       inheritance: patch.inheritance ?? field.inheritance,
       defaultValue: patch.defaultValue ?? field.defaultValue,
+      isIndexed: nextIndexed,
       isSearchable: patch.isSearchable ?? field.isSearchable,
       fieldGroupId: patch.fieldGroupId === undefined ? field.fieldGroupId : patch.fieldGroupId,
       updatedAt: new Date(),
@@ -364,6 +345,13 @@ export async function updateField(
     // are cleared and rebuilt from the new type.
     await tx.delete(itemFieldIndex).where(eq(itemFieldIndex.fieldId, fieldId));
     if (updated.isIndexed) await backfillField(tx, workspaceId, updated);
+  } else if (nextIndexed && !field.isIndexed) {
+    // This is the opt-in the FIELD_NOT_FILTERABLE error points at: indexing
+    // happens here, on an explicit PATCH, never inline inside a filter. (At
+    // Inngest scale this hands off to the `fieldBackfill` job.)
+    await backfillField(tx, workspaceId, updated);
+  } else if (!nextIndexed && field.isIndexed) {
+    await tx.delete(itemFieldIndex).where(eq(itemFieldIndex.fieldId, fieldId));
   }
 
   await invalidateSchemaCache(workspaceId, field.itemTypeId);

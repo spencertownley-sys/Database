@@ -12,6 +12,7 @@ import { items } from '@/server/db/schema/items';
 import { AppError } from '@/server/lib/errors';
 import { appendKeys, firstKey } from '@/server/lib/fractionalIndex';
 import { PRESETS_BY_KEY, type ItemTypePreset } from '@/components/type-builder/presets';
+import { ALWAYS_INDEXED_TYPES } from './fields.service';
 import { VARIANT_AXIS_TYPES } from '@/types/fields';
 
 export interface ItemTypeWithSchema extends ItemType {
@@ -235,7 +236,7 @@ async function applyPresetSchema(
             requiredForCompleteness: f.requiredForCompleteness ?? false,
             defaultValue: f.defaultValue ?? null,
             inheritance: f.inheritance ?? 'variant',
-            isIndexed: f.isIndexed ?? false,
+            isIndexed: ALWAYS_INDEXED_TYPES.has(f.type) || (f.isIndexed ?? false),
             isSearchable: f.isSearchable ?? false,
             position: fieldOrderKeys[i] ?? firstKey(),
             createdBy: actorId,

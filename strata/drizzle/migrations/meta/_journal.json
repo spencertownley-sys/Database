@@ -57,6 +57,13 @@
       "when": 1786824050918,
       "tag": "0007_spec_data_model_alignment",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786824582284,
+      "tag": "0008_always_indexed_types",
+      "breakpoints": true
     }
   ]
 }

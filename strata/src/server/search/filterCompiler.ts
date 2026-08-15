@@ -243,6 +243,7 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
       field: clause.field,
     });
   }
+  assertFilterable(field);
 
   const column = indexColumnFor(field.type, field.config);
   assertOperatorForColumn(clause.operator, column, field.label);
@@ -473,8 +474,27 @@ function compileUuidColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
   }
 }
 
-const MAX_FILTER_DEPTH = 8;
-const MAX_CLAUSES = 100;
+/** API Design §4.1 limits. Beyond either, 422 FILTER_TOO_COMPLEX. */
+const MAX_FILTER_DEPTH = 4;
+const MAX_CLAUSES = 20;
+
+/**
+ * A clause on a non-indexed field is a 400, never a slow success (§4.1): a
+ * filter that quietly takes eight seconds trains users to distrust the
+ * product, and the error's `details.action` is a one-click fix that indexes
+ * the field via an opt-in backfill instead of an inline table scan.
+ */
+function assertFilterable(field: Field): void {
+  if (field.isIndexed) return;
+  throw new AppError(
+    'FIELD_NOT_FILTERABLE',
+    `"${field.label}" is not indexed for filtering.`,
+    {
+      fieldKey: field.key,
+      action: `PATCH /fields/${field.id} with is_indexed: true`,
+    },
+  );
+}
 
 /** Compiles a filter tree. Returns `null` for an empty filter (match all). */
 export function compileFilter(
@@ -486,7 +506,11 @@ export function compileFilter(
 
   function walk(group: FilterGroup, depth: number): SQL | null {
     if (depth > MAX_FILTER_DEPTH) {
-      throw new AppError('VALIDATION_ERROR', 'This filter is nested too deeply.');
+      throw new AppError(
+        'FILTER_TOO_COMPLEX',
+        `Filters can nest at most ${MAX_FILTER_DEPTH} levels deep.`,
+        { maxDepth: MAX_FILTER_DEPTH },
+      );
     }
 
     const parts: SQL[] = [];
@@ -499,7 +523,9 @@ export function compileFilter(
 
       clauseCount += 1;
       if (clauseCount > MAX_CLAUSES) {
-        throw new AppError('VALIDATION_ERROR', `A filter may have at most ${MAX_CLAUSES} rules.`);
+        throw new AppError('FILTER_TOO_COMPLEX', `A filter may have at most ${MAX_CLAUSES} rules.`, {
+          maxClauses: MAX_CLAUSES,
+        });
       }
 
       parts.push(
@@ -562,6 +588,7 @@ export function buildSortTerms(
     if (!field) {
       throw new AppError('VALIDATION_ERROR', `Cannot sort by "${spec.field}" — no such field.`);
     }
+    assertFilterable(field);
     const column = indexColumnFor(field.type, field.config);
     if (column === 'text_array') {
       throw new AppError(

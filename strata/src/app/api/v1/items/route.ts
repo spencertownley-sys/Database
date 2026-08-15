@@ -6,8 +6,6 @@ import { handle, parseQuery } from '@/server/lib/route';
 import { collection } from '@/lib/wire';
 import { assertCan } from '@/server/services/permissions.service';
 import { searchProvider } from '@/server/search/PostgresSearchProvider';
-import { referencedFieldKeys } from '@/server/search/filterCompiler';
-import { ensureFieldsIndexed } from '@/server/services/fields.service';
 import { listItemsQuerySchema } from '@/server/validation/schemas';
 import type { FilterGroup, SortSpec } from '@/types/filters';
 
@@ -35,17 +33,12 @@ export async function GET(request: Request): Promise<Response> {
           ),
         );
 
-      // Filtering or sorting on a field is the signal that it is worth
-      // indexing. Flipping `is_indexed` here (and backfilling in the
-      // background) is what keeps write cost proportional to the fields people
-      // actually query rather than to every field they ever defined.
-      await ensureFieldsIndexed(
-        tx,
-        context.workspace.id,
-        referencedFieldKeys(query.filter as FilterGroup | undefined, query.sort as SortSpec[]),
-        liveFields,
-      );
-
+      // Deliberately NO auto-indexing here: a clause on a non-indexed field
+      // returns 400 FIELD_NOT_FILTERABLE (compiled below), whose
+      // `details.action` names the PATCH that indexes the field via an
+      // explicit, opt-in backfill. Turning a user's first filter into a
+      // synchronous full-table backfill is the exact latency spike the error
+      // exists to prevent (API Design §4.1, SPEC_RECONCILIATION §1.3).
       const page = await searchProvider.search(
         tx,
         context.workspace.id,

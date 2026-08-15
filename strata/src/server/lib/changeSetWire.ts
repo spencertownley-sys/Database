@@ -8,9 +8,7 @@
  */
 
 import type { ChangeSet } from '@/server/db/schema/changeSets';
-
-/** §4.3: undoable from the activity feed for 24 hours after commit. */
-export const UNDO_WINDOW_HOURS = 24;
+import { UNDO_WINDOW_HOURS } from '@/server/services/changeSets.service';
 
 export function undoAvailableUntil(changeSet: ChangeSet): Date | null {
   if (!changeSet.committedAt) return null;

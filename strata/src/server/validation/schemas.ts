@@ -134,7 +134,7 @@ export const itemDraftSchema = z.object({
 
 export const changeTargetSchema = z.object({
   kind: z.enum(['ids', 'filter', 'subtree', 'new']),
-  itemIds: z.array(uuidSchema).max(50_000).optional(),
+  itemIds: z.array(uuidSchema).max(10_000).optional(),
   filter: filterGroupSchema.optional(),
   rootItemId: uuidSchema.optional(),
   includeDescendants: z.boolean().optional(),
@@ -177,6 +177,7 @@ export const createFieldSchema = z.object({
   helpText: z.string().max(500).optional(),
   fieldGroupId: uuidSchema.nullable().optional(),
   defaultValue: z.unknown().optional(),
+  isIndexed: z.boolean().optional(),
   isSearchable: z.boolean().default(false),
   /**
    * Required when adding a required field to a type that already has items:

@@ -99,3 +99,13 @@
     scrollbar-color: var(--color-border-strong) transparent;
   }
 }
+
+/* The undo toast's draining progress line (UI/UX Notes §3.4). */
+@keyframes toast-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}

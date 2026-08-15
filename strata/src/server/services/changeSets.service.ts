@@ -74,9 +74,12 @@ import { coerceValue, type CoerceContext } from '@/server/validation/fieldTypes'
 import type { InvalidValues } from '@/server/db/schema/items';
 
 export const BULK_SYNC_THRESHOLD = Number(process.env.BULK_SYNC_THRESHOLD ?? 500);
-/** Beyond this a preview is refused outright rather than queued. */
-export const MAX_ITEMS_PER_CHANGE_SET = 50_000;
-const PREVIEW_TTL_MINUTES = 30;
+/** §5: beyond this a preview is refused outright (TARGET_TOO_LARGE). */
+export const MAX_ITEMS_PER_CHANGE_SET = 10_000;
+/** §5: previews expire after one hour. */
+const PREVIEW_TTL_MINUTES = 60;
+/** §4.3 / §5: committed sets stay undoable for 24 hours. */
+export const UNDO_WINDOW_HOURS = 24;
 const SAMPLE_SIZE = 20;
 
 export interface ChangeContext {
@@ -892,7 +895,7 @@ export async function commitChangeSet(
   if (changeSet.expiresAt && changeSet.expiresAt.getTime() < Date.now()) {
     await tx.update(changeSets).set({ status: 'expired' }).where(eq(changeSets.id, changeSetId));
     throw new AppError(
-      'STALE_PREVIEW',
+      'PREVIEW_EXPIRED',
       'This preview has expired. Re-run it to see the current state before applying.',
     );
   }
@@ -1034,6 +1037,19 @@ export async function undoChangeSet(
     throw new AppError(
       'OPERATION_NOT_APPLICABLE',
       `A change that is ${original.status} cannot be undone.`,
+    );
+  }
+  if (
+    original.committedAt &&
+    Date.now() - original.committedAt.getTime() > UNDO_WINDOW_HOURS * 3_600_000
+  ) {
+    // §4.3: the activity feed offers undo for 24 hours. After that, restoring
+    // old values would clobber a day of other people's edits — the staleness
+    // check would fail anyway, so refuse with the honest error.
+    throw new AppError(
+      'UNDO_WINDOW_EXPIRED',
+      `Changes can be undone for ${UNDO_WINDOW_HOURS} hours after they are applied.`,
+      { committedAt: original.committedAt.toISOString() },
     );
   }
 

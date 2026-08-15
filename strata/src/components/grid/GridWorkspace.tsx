@@ -30,6 +30,7 @@ interface Toast {
   id: number;
   message: string;
   tone: 'info' | 'error';
+  ttlMs?: number;
   undo?: () => void;
 }
 
@@ -77,10 +78,13 @@ export function GridWorkspace(props: GridWorkspaceProps) {
 
   const pushToast = useCallback((toast: { message: string; undo?: () => void; tone?: 'info' | 'error' }) => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
-    setToasts((current) => [...current.slice(-2), { id, tone: toast.tone ?? 'info', ...toast }]);
-    // Undo toasts linger: a bulk edit the user wants back needs more than the
-    // three seconds a confirmation would get.
-    const ttl = toast.undo ? 12_000 : 5_000;
+    // UI/UX §3.4: the undo toast persists for 60 seconds with a draining
+    // progress line; the change stays undoable from the activity feed for 24h.
+    const ttl = toast.undo ? 60_000 : 5_000;
+    setToasts((current) => [
+      ...current.slice(-2),
+      { id, tone: toast.tone ?? 'info', ttlMs: ttl, ...toast },
+    ]);
     setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), ttl);
   }, []);
 
@@ -154,7 +158,7 @@ export function GridWorkspace(props: GridWorkspaceProps) {
             key={toast.id}
             role="status"
             aria-live="polite"
-            className={`pointer-events-auto flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm shadow-lg ${
+            className={`pointer-events-auto relative flex items-center gap-3 overflow-hidden rounded-[var(--radius-md)] px-3 py-2 text-sm shadow-lg ${
               toast.tone === 'error'
                 ? 'bg-[var(--color-danger)] text-white'
                 : 'bg-[var(--color-ink)] text-white'
@@ -172,6 +176,13 @@ export function GridWorkspace(props: GridWorkspaceProps) {
               >
                 Undo
               </button>
+            )}
+            {toast.undo && (
+              <span
+                aria-hidden
+                className="absolute inset-x-0 bottom-0 h-0.5 origin-left bg-white/50 motion-safe:animate-[toast-drain_linear_forwards]"
+                style={{ animationDuration: `${toast.ttlMs ?? 60_000}ms` }}
+              />
             )}
           </div>
         ))}
