@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
+  bigserial,
   boolean,
   index,
   integer,
@@ -131,7 +132,8 @@ export const changeSets = pgTable(
 export const changeEntries = pgTable(
   'change_entries',
   {
-    id: primaryId(),
+    /** bigserial, not uuid: the highest-volume table gets 8-byte keys (§2.7). */
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
     workspaceId: workspaceIdColumn().references(() => workspaces.id, { onDelete: 'cascade' }),
     changeSetId: uuid('change_set_id')
       .notNull()
@@ -178,7 +180,7 @@ export interface ItemDraft {
   treeNodeIds?: string[];
   itemTypeId?: string;
   /** Set when generating variants of a model. */
-  variantOfId?: string | null;
+  variantParentId?: string | null;
   isVariantModel?: boolean;
   variantAxisValues?: Record<string, string> | null;
 }

@@ -161,9 +161,10 @@ interface PendingItem {
   title: string;
   parentId: string | null;
   path: string;
-  orderKey: string;
+  depth: number;
+  position: string;
   isVariantModel: boolean;
-  variantOfId: string | null;
+  variantParentId: string | null;
   variantAxisValues: Record<string, string> | null;
   values: Record<string, unknown>;
   effectiveValues: Record<string, unknown>;
@@ -234,12 +235,12 @@ async function seedItemTypeSchema(
     id: typeId,
     workspaceId,
     key: preset.key,
-    name: preset.name,
-    pluralName: preset.pluralName,
+    label: preset.label,
+    pluralLabel: preset.pluralLabel,
     description: preset.description,
     icon: preset.icon,
     color: preset.color,
-    presetKey: preset.key,
+    presetSource: preset.key,
     variantAxes: preset.variantAxes ?? [],
     createdBy: actorId,
   });
@@ -251,7 +252,7 @@ async function seedItemTypeSchema(
     itemTypeId: typeId,
     key: g.key,
     label: g.label,
-    orderKey: groupOrder[i] as string,
+    position: groupOrder[i] as string,
     collapsedByDefault: g.collapsedByDefault ?? false,
   }));
   if (groupRows.length) await db.insert(fieldGroups).values(groupRows);
@@ -273,7 +274,7 @@ async function seedItemTypeSchema(
     inheritance: f.inheritance ?? ('variant' as const),
     isIndexed: f.isIndexed ?? false,
     isSearchable: f.isSearchable ?? false,
-    orderKey: fieldOrder[i] as string,
+    position: fieldOrder[i] as string,
     createdBy: actorId,
   }));
   if (fieldRows.length) {
@@ -300,7 +301,7 @@ async function seedItemTypeSchema(
 function finalize(
   item: Omit<
     PendingItem,
-    'effectiveValues' | 'completenessPct' | 'missingRequired' | 'searchText'
+    'depth' | 'effectiveValues' | 'completenessPct' | 'missingRequired' | 'searchText'
   >,
   schemaDef: SeededSchema,
   modelValues?: Record<string, unknown>,
@@ -326,6 +327,7 @@ function finalize(
 
   return {
     ...item,
+    depth: item.path.split('.').length - 1,
     effectiveValues,
     completenessPct: completeness.pct,
     missingRequired: completeness.missingRequired,
@@ -425,7 +427,7 @@ async function seedWorkspace(
     id: treeId,
     workspaceId,
     key: 'clients',
-    name: 'Clients',
+    label: 'Clients',
     description: 'Who the work belongs to.',
     isBuiltIn: true,
     icon: 'folder',
@@ -437,8 +439,8 @@ async function seedWorkspace(
     treeId: string;
     parentId: string | null;
     path: string;
-    orderKey: string;
-    name: string;
+    position: string;
+    label: string;
     itemCount: number;
   }> = [];
 
@@ -454,8 +456,8 @@ async function seedWorkspace(
       treeId,
       parentId: null,
       path: rootPath,
-      orderKey: rootKeys[i] as string,
-      name: clientName,
+      position: rootKeys[i] as string,
+      label: clientName,
       itemCount: 0,
     });
 
@@ -470,8 +472,8 @@ async function seedWorkspace(
         treeId,
         parentId: rootId,
         path,
-        orderKey: childKeys[j] as string,
-        name: childName,
+        position: childKeys[j] as string,
+        label: childName,
         itemCount: 0,
       });
       leafNodeIds.push(childId);
@@ -488,8 +490,8 @@ async function seedWorkspace(
             treeId,
             parentId: childId,
             path: childPath(path, grandId),
-            orderKey: grandKeys[k] as string,
-            name: grandName,
+            position: grandKeys[k] as string,
+            label: grandName,
             itemCount: 0,
           });
           leafNodeIds.push(grandId);
@@ -535,9 +537,9 @@ async function seedWorkspace(
           title,
           parentId: null,
           path,
-          orderKey: projectOrder[p] as string,
+          position: projectOrder[p] as string,
           isVariantModel: false,
-          variantOfId: null,
+          variantParentId: null,
           variantAxisValues: null,
           values,
           assigneeId: (values.account_lead as string) ?? null,
@@ -548,7 +550,7 @@ async function seedWorkspace(
       ),
     );
 
-    const node = nodeRows.find((n) => n.name === clientName);
+    const node = nodeRows.find((n) => n.label === clientName);
     if (node) {
       memberships.push({ workspaceId, itemId: projectId, treeNodeId: node.id, treeId });
     }
@@ -577,9 +579,9 @@ async function seedWorkspace(
             title: TASK_TITLES[(p * 3 + t) % TASK_TITLES.length] as string,
             parentId: projectId,
             path: taskPath,
-            orderKey: taskOrder[t] as string,
+            position: taskOrder[t] as string,
             isVariantModel: false,
-            variantOfId: null,
+            variantParentId: null,
             variantAxisValues: null,
             values: taskValues,
             assigneeId: (taskValues.assignee as string) ?? null,
@@ -609,9 +611,9 @@ async function seedWorkspace(
                 title: `${TASK_TITLES[(t + s) % TASK_TITLES.length]} — part ${s + 1}`,
                 parentId: taskId,
                 path: childPath(taskPath, subId),
-                orderKey: subOrder[s] as string,
+                position: subOrder[s] as string,
                 isVariantModel: false,
-                variantOfId: null,
+                variantParentId: null,
                 variantAxisValues: null,
                 values: subValues,
                 assigneeId: (subValues.assignee as string) ?? null,
@@ -648,9 +650,9 @@ async function seedWorkspace(
           title: CAMPAIGN_TITLES[c % CAMPAIGN_TITLES.length] as string,
           parentId: null,
           path: childPath(null, campaignId),
-          orderKey: campaignOrder[c] as string,
+          position: campaignOrder[c] as string,
           isVariantModel: false,
-          variantOfId: null,
+          variantParentId: null,
           variantAxisValues: null,
           values,
           assigneeId: (values.owner as string) ?? null,
@@ -693,9 +695,9 @@ async function seedWorkspace(
             title: productTitle,
             parentId: null,
             path: childPath(null, modelId),
-            orderKey: modelOrder[i] as string,
+            position: modelOrder[i] as string,
             isVariantModel: true,
-            variantOfId: null,
+            variantParentId: null,
             variantAxisValues: null,
             values: modelValues,
             assigneeId: null,
@@ -736,9 +738,9 @@ async function seedWorkspace(
                 title: `${productTitle} · ${region.toUpperCase()} · ${size.toUpperCase()}`,
                 parentId: null,
                 path: childPath(null, variantId),
-                orderKey: variantKeys[v] as string,
+                position: variantKeys[v] as string,
                 isVariantModel: false,
-                variantOfId: modelId,
+                variantParentId: modelId,
                 variantAxisValues: { region, size },
                 values: variantValues,
                 assigneeId: null,
@@ -801,7 +803,7 @@ async function seedWorkspace(
   // --- guest scope ---------------------------------------------------------
   if (spec.guestEmail) {
     const guestMemberId = memberIdByEmail.get(spec.guestEmail);
-    const scopedNode = nodeRows.find((n) => n.name === CLIENT_NAMES[0]);
+    const scopedNode = nodeRows.find((n) => n.label === CLIENT_NAMES[0]);
     if (guestMemberId && scopedNode) {
       await db.insert(guestScopes).values({
         id: uuid(),
@@ -832,7 +834,7 @@ async function main(): Promise<void> {
       name: 'Northwind Agency',
       members: [
         ['alice@northwind.test', 'owner'],
-        ['bob@northwind.test', 'editor'],
+        ['bob@northwind.test', 'member'],
         ['carol@northwind.test', 'viewer'],
         ['morgan@shared.test', 'admin'],
         ['dana@client.test', 'guest'],
@@ -852,7 +854,7 @@ async function main(): Promise<void> {
       name: 'Northwind Partners',
       members: [
         ['erin@partners.test', 'owner'],
-        ['frank@partners.test', 'editor'],
+        ['frank@partners.test', 'member'],
         ['morgan@shared.test', 'viewer'],
       ],
       projectCount: 4,

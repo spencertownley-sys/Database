@@ -27,11 +27,11 @@ export async function snapshotWorkspace(
 ): Promise<WorkspaceSnapshot> {
   const items = await tx.execute(sql`
     select
-      id, item_type_id, title, parent_id, path::text as path, order_key,
-      is_variant_model, variant_of_id, variant_axis_values,
+      id, item_type_id, title, parent_id, path::text as path, position,
+      is_variant_model, variant_parent_id, variant_axis_values,
       values, effective_values, invalid_values,
       completeness_pct, missing_required, search_text, assignee_id,
-      (deleted_at is not null) as is_deleted
+      (archived_at is not null) as is_deleted
     from items
     where workspace_id = ${workspaceId}
     order by id

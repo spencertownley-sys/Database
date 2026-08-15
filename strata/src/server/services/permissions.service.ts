@@ -212,7 +212,7 @@ const GUEST_ALLOWED: readonly Action[] = [
 const ROLE_MATRIX: Record<MemberRole, ReadonlySet<Action>> = {
   owner: new Set(ALL),
   admin: new Set(ALL.filter((a) => !ADMIN_DENIED.includes(a))),
-  editor: new Set(EDITOR_ALLOWED),
+  member: new Set(EDITOR_ALLOWED),
   viewer: new Set(VIEWER_ALLOWED),
   guest: new Set(GUEST_ALLOWED),
 };
@@ -268,7 +268,7 @@ const ADMIN_ACTIONS: ReadonlySet<Action> = new Set<Action>([
 const ROLE_LABEL: Record<MemberRole, string> = {
   owner: 'Owners',
   admin: 'Admins',
-  editor: 'Editors',
+  member: 'Editors',
   viewer: 'Viewers',
   guest: 'Guests',
 };
@@ -378,7 +378,7 @@ function roleDenialMessage(role: MemberRole, action: Action): string {
   switch (role) {
     case 'viewer':
       return `Viewers have read-only access. Ask an admin to make you an editor to change ${subject?.replace('_', ' ')}s.`;
-    case 'editor':
+    case 'member':
       if (action.startsWith('item_type.') || action.startsWith('field.')) {
         return 'Only admins can change item types and fields — they affect everyone’s views.';
       }

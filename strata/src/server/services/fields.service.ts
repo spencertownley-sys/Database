@@ -113,7 +113,7 @@ export async function backfillField(tx: Tx, workspaceId: string, field: Field): 
     from items i
     where i.workspace_id = ${workspaceId}::uuid
       and i.item_type_id = ${field.itemTypeId}::uuid
-      and i.deleted_at is null
+      and i.archived_at is null
       and i.effective_values ? ${key}
       and jsonb_typeof(i.effective_values -> ${key}) <> 'null'
     on conflict (item_id, field_id) do update set
@@ -165,7 +165,7 @@ export async function createField(
         and(
           eq(items.workspaceId, workspaceId),
           eq(items.itemTypeId, input.itemTypeId),
-          isNull(items.deletedAt),
+          isNull(items.archivedAt),
         ),
       );
 
@@ -182,8 +182,8 @@ export async function createField(
     }
   }
 
-  const lastKey = existing[existing.length - 1]?.orderKey ?? null;
-  const [orderKey] = appendKeys(lastKey, 1);
+  const lastKey = existing[existing.length - 1]?.position ?? null;
+  const [position] = appendKeys(lastKey, 1);
 
   const [created] = await tx
     .insert(fieldsTable)
@@ -200,7 +200,7 @@ export async function createField(
       defaultValue: input.defaultValue ?? null,
       inheritance: input.inheritance ?? 'variant',
       isSearchable: input.isSearchable ?? false,
-      orderKey: orderKey as string,
+      position: position as string,
       createdBy: actorId,
     })
     .returning();
@@ -226,7 +226,7 @@ export async function listFields(
         opts.includeDeleted ? undefined : isNull(fieldsTable.deletedAt),
       ),
     )
-    .orderBy(fieldsTable.orderKey);
+    .orderBy(fieldsTable.position);
 }
 
 export interface ConversionPreview {
@@ -262,7 +262,7 @@ export async function previewFieldTypeChange(
       and(
         eq(items.workspaceId, workspaceId),
         eq(items.itemTypeId, field.itemTypeId),
-        isNull(items.deletedAt),
+        isNull(items.archivedAt),
       ),
     );
 
@@ -451,11 +451,11 @@ export async function reorderField(
   tx: Tx,
   workspaceId: string,
   fieldId: string,
-  orderKey: string,
+  position: string,
 ): Promise<void> {
   await tx
     .update(fieldsTable)
-    .set({ orderKey, updatedAt: new Date() })
+    .set({ position, updatedAt: new Date() })
     .where(and(eq(fieldsTable.workspaceId, workspaceId), eq(fieldsTable.id, fieldId)));
 }
 

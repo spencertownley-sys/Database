@@ -10,9 +10,13 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { customType } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, primaryId, timestamps, workspaceIdColumn } from './_shared';
 
-export const memberRoleEnum = pgEnum('member_role', ['owner', 'admin', 'editor', 'viewer', 'guest']);
+/** Case-insensitive text — uniqueness on `citext` ignores case by type. */
+const citext = customType<{ data: string }>({ dataType: () => 'citext' });
+
+export const memberRoleEnum = pgEnum('member_role', ['owner', 'admin', 'member', 'guest', 'viewer']);
 export const memberStatusEnum = pgEnum('member_status', ['pending', 'active', 'suspended']);
 export const workspacePlanEnum = pgEnum('workspace_plan', ['free', 'team', 'business']);
 
@@ -55,13 +59,13 @@ export const users = pgTable(
     id: primaryId(),
     /** Supabase `auth.users.id`. Null only for seeded fixture users. */
     authUserId: uuid('auth_user_id'),
-    email: text('email').notNull(),
+    email: citext('email').notNull(),
     name: text('name'),
     avatarUrl: text('avatar_url'),
     ...timestamps(),
   },
   (t) => [
-    uniqueIndex('users_email_key').on(sql`lower(${t.email})`),
+    uniqueIndex('users_email_key').on(t.email),
     uniqueIndex('users_auth_user_id_key').on(t.authUserId),
   ],
 );
@@ -74,7 +78,7 @@ export const workspaceMembers = pgTable(
     userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
     /** Set for invitations not yet accepted, where no user row exists yet. */
     invitedEmail: text('invited_email'),
-    role: memberRoleEnum('role').notNull().default('editor'),
+    role: memberRoleEnum('role').notNull().default('member'),
     status: memberStatusEnum('status').notNull().default('pending'),
     inviteToken: text('invite_token'),
     inviteExpiresAt: timestamp('invite_expires_at', { withTimezone: true, mode: 'date' }),

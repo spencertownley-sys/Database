@@ -50,6 +50,13 @@
       "when": 1786822578517,
       "tag": "0006_completeness_required_only",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786824050918,
+      "tag": "0007_spec_data_model_alignment",
+      "breakpoints": true
     }
   ]
 }

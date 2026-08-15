@@ -51,14 +51,14 @@ export async function GET(request: Request): Promise<Response> {
               .select()
               .from(fieldsTable)
               .where(and(inArray(fieldsTable.itemTypeId, typeIds), isNull(fieldsTable.deletedAt)))
-              .orderBy(asc(fieldsTable.orderKey))
+              .orderBy(asc(fieldsTable.position))
           : Promise.resolve([]),
         wantGroups
           ? tx
               .select()
               .from(fieldGroups)
               .where(inArray(fieldGroups.itemTypeId, typeIds))
-              .orderBy(asc(fieldGroups.orderKey))
+              .orderBy(asc(fieldGroups.position))
           : Promise.resolve([]),
       ]);
 
@@ -84,13 +84,13 @@ export async function POST(request: Request): Promise<Response> {
       return withWorkspace(context.workspace.id, async (tx) => {
         // A preset arrives populated; a bare type does not. The two-minute
         // path always goes through a preset, so this is the common branch.
-        if (input.presetKey) {
+        if (input.preset) {
           return createItemTypeFromPreset(
             tx,
             context.workspace.id,
-            input.presetKey,
+            input.preset,
             context.actor.userId,
-            { name: input.name, key: input.key },
+            { name: input.label, key: input.key },
           );
         }
 

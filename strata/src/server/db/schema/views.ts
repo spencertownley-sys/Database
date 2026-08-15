@@ -20,9 +20,9 @@ export const viewVisibilityEnum = pgEnum('view_visibility', ['private', 'workspa
 
 /**
  * A saved lens over one Item Type. Grid, list, and board are three renderings
- * of the *same* config — switching kind preserves filters and sort, which is
+ * of the *same* config — switching type preserves filters and sort, which is
  * a Step 8 acceptance criterion, so the filter/sort/group fields must stay
- * kind-agnostic.
+ * type-agnostic.
  */
 export const views = pgTable(
   'views',
@@ -32,7 +32,7 @@ export const views = pgTable(
     itemTypeId: uuid('item_type_id')
       .notNull()
       .references(() => itemTypes.id, { onDelete: 'cascade' }),
-    kind: viewKindEnum('kind').notNull().default('grid'),
+    type: viewKindEnum('type').notNull().default('grid'),
     name: text('name').notNull(),
     description: text('description'),
     visibility: viewVisibilityEnum('visibility').notNull().default('private'),

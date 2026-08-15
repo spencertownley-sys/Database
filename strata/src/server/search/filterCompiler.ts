@@ -330,8 +330,8 @@ function compileSystemClause(clause: FilterClause, ctx: CompileContext): SQL {
 
     case '$is_variant':
       return op === 'is_true'
-        ? sql`${itemRef}.variant_of_id is not null`
-        : sql`${itemRef}.variant_of_id is null`;
+        ? sql`${itemRef}.variant_parent_id is not null`
+        : sql`${itemRef}.variant_parent_id is null`;
 
     case '$has_invalid_values':
       return op === 'is_true'

@@ -76,7 +76,7 @@ export default async function WorkspaceLayout({
                     href={`/w/${slug}/types/${type.id}`}
                     className="flex items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
                   >
-                    <span className="truncate">{type.pluralName ?? type.name}</span>
+                    <span className="truncate">{type.pluralLabel ?? type.label}</span>
                     <span className="tabular shrink-0 text-xs text-[var(--color-ink-subtle)]">
                       {type.itemCount}
                     </span>

@@ -192,7 +192,7 @@ function buildWhere(
   const itemRef = sql.identifier(ITEM_ALIAS);
   const parts: SQL[] = [
     sql`${itemRef}.workspace_id = ${workspaceId}::uuid`,
-    sql`${itemRef}.deleted_at is null`,
+    sql`${itemRef}.archived_at is null`,
   ];
 
   if (query.itemTypeId) {
@@ -201,7 +201,7 @@ function buildWhere(
 
   if (!query.includeVariants) {
     // Variants are shown nested under their model, not as loose grid rows.
-    parts.push(sql`${itemRef}.variant_of_id is null`);
+    parts.push(sql`${itemRef}.variant_parent_id is null`);
   }
 
   if (query.incompleteOnly) {
@@ -219,7 +219,7 @@ function buildWhere(
   }
 
   if (query.variantParentId) {
-    parts.push(sql`${itemRef}.variant_of_id = ${query.variantParentId}::uuid`);
+    parts.push(sql`${itemRef}.variant_parent_id = ${query.variantParentId}::uuid`);
   }
 
   if (query.treeNodeId) {
@@ -262,9 +262,10 @@ const SELECT_COLUMNS = sql`
   ${sql.identifier(ITEM_ALIAS)}.title,
   ${sql.identifier(ITEM_ALIAS)}.parent_id as "parentId",
   ${sql.identifier(ITEM_ALIAS)}.path::text as path,
-  ${sql.identifier(ITEM_ALIAS)}.order_key as "orderKey",
+  ${sql.identifier(ITEM_ALIAS)}.depth,
+  ${sql.identifier(ITEM_ALIAS)}.position as "position",
   ${sql.identifier(ITEM_ALIAS)}.is_variant_model as "isVariantModel",
-  ${sql.identifier(ITEM_ALIAS)}.variant_of_id as "variantOfId",
+  ${sql.identifier(ITEM_ALIAS)}.variant_parent_id as "variantParentId",
   ${sql.identifier(ITEM_ALIAS)}.variant_axis_values as "variantAxisValues",
   ${sql.identifier(ITEM_ALIAS)}.values,
   ${sql.identifier(ITEM_ALIAS)}.effective_values as "effectiveValues",
@@ -277,7 +278,7 @@ const SELECT_COLUMNS = sql`
   ${sql.identifier(ITEM_ALIAS)}.updated_by as "updatedBy",
   ${sql.identifier(ITEM_ALIAS)}.created_at as "createdAt",
   ${sql.identifier(ITEM_ALIAS)}.updated_at as "updatedAt",
-  ${sql.identifier(ITEM_ALIAS)}.deleted_at as "deletedAt"
+  ${sql.identifier(ITEM_ALIAS)}.archived_at as "archivedAt"
 `;
 
 // ---------------------------------------------------------------------------
@@ -317,7 +318,7 @@ export class PostgresSearchProvider implements SearchProvider {
       ...item,
       createdAt: new Date(item.createdAt),
       updatedAt: new Date(item.updatedAt),
-      deletedAt: item.deletedAt ? new Date(item.deletedAt) : null,
+      deletedAt: item.archivedAt ? new Date(item.archivedAt) : null,
     }));
     const hasMore = list.length > limit;
     const page = hasMore ? list.slice(0, limit) : list;

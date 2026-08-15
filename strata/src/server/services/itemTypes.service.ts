@@ -60,8 +60,8 @@ export async function listItemTypes(tx: Tx, workspaceId: string): Promise<ItemTy
   return tx
     .select()
     .from(itemTypes)
-    .where(and(eq(itemTypes.workspaceId, workspaceId), isNull(itemTypes.deletedAt)))
-    .orderBy(asc(itemTypes.name));
+    .where(and(eq(itemTypes.workspaceId, workspaceId), isNull(itemTypes.archivedAt)))
+    .orderBy(asc(itemTypes.label));
 }
 
 /**
@@ -82,7 +82,7 @@ export async function getItemTypeWithSchema(
       and(
         eq(itemTypes.workspaceId, workspaceId),
         eq(itemTypes.id, itemTypeId),
-        isNull(itemTypes.deletedAt),
+        isNull(itemTypes.archivedAt),
       ),
     )
     .limit(1);
@@ -94,12 +94,12 @@ export async function getItemTypeWithSchema(
       .select()
       .from(fieldsTable)
       .where(and(eq(fieldsTable.itemTypeId, itemTypeId), isNull(fieldsTable.deletedAt)))
-      .orderBy(asc(fieldsTable.orderKey)),
+      .orderBy(asc(fieldsTable.position)),
     tx
       .select()
       .from(fieldGroups)
       .where(eq(fieldGroups.itemTypeId, itemTypeId))
-      .orderBy(asc(fieldGroups.orderKey)),
+      .orderBy(asc(fieldGroups.position)),
   ]);
 
   return { ...type, fields: typeFields, fieldGroups: typeGroups };
@@ -107,12 +107,12 @@ export async function getItemTypeWithSchema(
 
 export interface CreateItemTypeInput {
   key?: string;
-  name: string;
-  pluralName?: string;
+  label: string;
+  pluralLabel?: string;
   description?: string;
   icon?: string;
   color?: string;
-  presetKey?: string;
+  presetSource?: string;
 }
 
 export async function createItemType(
@@ -123,7 +123,7 @@ export async function createItemType(
 ): Promise<ItemType> {
   const existing = await listItemTypes(tx, workspaceId);
   const taken = new Set(existing.map((t) => t.key));
-  const key = input.key ?? slugifyKey(input.name, taken);
+  const key = input.key ?? slugifyKey(input.label, taken);
   assertValidKey(key);
   if (taken.has(key)) {
     throw new AppError('CONFLICT', `An item type with the key "${key}" already exists.`);
@@ -134,12 +134,12 @@ export async function createItemType(
     .values({
       workspaceId,
       key,
-      name: input.name,
-      pluralName: input.pluralName ?? `${input.name}s`,
+      label: input.label,
+      pluralLabel: input.pluralLabel ?? `${input.label}s`,
       description: input.description ?? null,
       icon: input.icon ?? 'square',
       color: input.color ?? 'slate',
-      presetKey: input.presetKey ?? null,
+      presetSource: input.presetSource ?? null,
       createdBy: actorId,
     })
     .returning();
@@ -168,12 +168,12 @@ export async function createItemTypeFromPreset(
     workspaceId,
     {
       key: overrides.key,
-      name: overrides.name ?? preset.name,
-      pluralName: preset.pluralName,
+      label: overrides.name ?? preset.label,
+      pluralLabel: preset.pluralLabel,
       description: preset.description,
       icon: preset.icon,
       color: preset.color,
-      presetKey: preset.key,
+      presetSource: preset.key,
     },
     actorId,
   );
@@ -209,7 +209,7 @@ async function applyPresetSchema(
             itemTypeId,
             key: g.key,
             label: g.label,
-            orderKey: groupKeys[i] ?? firstKey(),
+            position: groupKeys[i] ?? firstKey(),
             collapsedByDefault: g.collapsedByDefault ?? false,
           })),
         )
@@ -237,7 +237,7 @@ async function applyPresetSchema(
             inheritance: f.inheritance ?? 'variant',
             isIndexed: f.isIndexed ?? false,
             isSearchable: f.isSearchable ?? false,
-            orderKey: fieldOrderKeys[i] ?? firstKey(),
+            position: fieldOrderKeys[i] ?? firstKey(),
             createdBy: actorId,
           })),
         )
@@ -278,7 +278,7 @@ export async function updateItemType(
   tx: Tx,
   workspaceId: string,
   itemTypeId: string,
-  patch: Partial<Pick<ItemType, 'name' | 'pluralName' | 'description' | 'icon' | 'color' | 'variantAxes'>>,
+  patch: Partial<Pick<ItemType, 'label' | 'pluralLabel' | 'description' | 'icon' | 'color' | 'variantAxes'>>,
 ): Promise<ItemType> {
   if (patch.variantAxes) {
     const { fields } = await getItemTypeWithSchema(tx, workspaceId, itemTypeId);
@@ -312,7 +312,7 @@ export async function deleteItemType(
       and(
         eq(items.workspaceId, workspaceId),
         eq(items.itemTypeId, itemTypeId),
-        isNull(items.deletedAt),
+        isNull(items.archivedAt),
       ),
     );
 
@@ -326,6 +326,6 @@ export async function deleteItemType(
 
   await tx
     .update(itemTypes)
-    .set({ deletedAt: new Date() })
+    .set({ archivedAt: new Date() })
     .where(and(eq(itemTypes.workspaceId, workspaceId), eq(itemTypes.id, itemTypeId)));
 }

@@ -151,8 +151,9 @@ export const changeSetInputSchema = z.object({
 });
 
 export const createItemTypeSchema = z.object({
-  name: z.string().min(1).max(120),
-  presetKey: z.string().max(60).optional(),
+  label: z.string().min(1).max(120),
+  /** A starter preset key (§3): task, client_project, campaign, … */
+  preset: z.string().max(60).optional(),
   key: z
     .string()
     .regex(/^[a-z][a-z0-9_]{0,62}$/, 'Use lowercase letters, digits and underscores.')

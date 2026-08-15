@@ -10,7 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { deletedAt, primaryId, timestamps, workspaceIdColumn } from './_shared';
+import { archivedAt, deletedAt, primaryId, timestamps, workspaceIdColumn } from './_shared';
 import { users, workspaces } from './workspaces';
 import type { FieldConfig, FieldType, InheritanceMode } from '@/types/fields';
 
@@ -46,13 +46,14 @@ export const itemTypes = pgTable(
     id: primaryId(),
     workspaceId: workspaceIdColumn().references(() => workspaces.id, { onDelete: 'cascade' }),
     key: text('key').notNull(),
-    name: text('name').notNull(),
-    pluralName: text('plural_name'),
+    /** Mutable display name; `key` is the immutable identifier. */
+    label: text('label').notNull(),
+    pluralLabel: text('plural_label'),
     description: text('description'),
     icon: text('icon'),
     color: text('color'),
-    /** Which preset it was created from, for concept hints and analytics. */
-    presetKey: text('preset_key'),
+    /** Which starter preset it came from (Tech Spec §2.2 — analytics). */
+    presetSource: text('preset_source'),
     variantAxes: text('variant_axes').array().notNull().default(sql`'{}'::text[]`),
     /** Denormalised; maintained inside change-set commits. */
     itemCount: integer('item_count').notNull().default(0),
@@ -60,11 +61,11 @@ export const itemTypes = pgTable(
     isSystem: boolean('is_system').notNull().default(false),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     ...timestamps(),
-    deletedAt: deletedAt(),
+    archivedAt: archivedAt(),
   },
   (t) => [
     uniqueIndex('item_types_ws_key_key').on(t.workspaceId, t.key),
-    index('item_types_ws_idx').on(t.workspaceId).where(sql`${t.deletedAt} is null`),
+    index('item_types_ws_idx').on(t.workspaceId).where(sql`${t.archivedAt} is null`),
   ],
 );
 
@@ -80,13 +81,13 @@ export const fieldGroups = pgTable(
     key: text('key').notNull(),
     label: text('label').notNull(),
     description: text('description'),
-    orderKey: text('order_key').notNull(),
+    position: text('position').notNull(),
     collapsedByDefault: boolean('collapsed_by_default').notNull().default(false),
     ...timestamps(),
   },
   (t) => [
     uniqueIndex('field_groups_type_key_key').on(t.itemTypeId, t.key),
-    index('field_groups_type_order_idx').on(t.itemTypeId, t.orderKey),
+    index('field_groups_type_order_idx').on(t.itemTypeId, t.position),
   ],
 );
 
@@ -135,7 +136,8 @@ export const fields = pgTable(
     isIndexed: boolean('is_indexed').notNull().default(false),
     /** Contributes to `items.search_text`. */
     isSearchable: boolean('is_searchable').notNull().default(false),
-    orderKey: text('order_key').notNull(),
+    /** Fractional index for display order. */
+    position: text('position').notNull(),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     ...timestamps(),
     /** Soft delete: values are retained for a 30-day restore window. */
@@ -147,7 +149,7 @@ export const fields = pgTable(
     uniqueIndex('fields_type_key_key')
       .on(t.itemTypeId, t.key)
       .where(sql`${t.deletedAt} is null`),
-    index('fields_type_order_idx').on(t.itemTypeId, t.orderKey).where(sql`${t.deletedAt} is null`),
+    index('fields_type_order_idx').on(t.itemTypeId, t.position).where(sql`${t.deletedAt} is null`),
     index('fields_ws_idx').on(t.workspaceId),
     index('fields_indexed_idx').on(t.itemTypeId).where(sql`${t.isIndexed} = true`),
   ],

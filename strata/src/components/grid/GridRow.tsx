@@ -27,7 +27,7 @@ export interface GridRowProps {
 function GridRowImpl(props: GridRowProps) {
   const { item, columns } = props;
   const invalid = item.invalidValues ?? {};
-  const isVariant = item.variantOfId !== null;
+  const isVariant = item.variantParentId !== null;
 
   return (
     <div

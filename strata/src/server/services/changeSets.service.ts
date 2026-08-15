@@ -163,7 +163,7 @@ async function loadFieldsByType(
         isNull(fieldsTable.deletedAt),
       ),
     )
-    .orderBy(fieldsTable.orderKey);
+    .orderBy(fieldsTable.position);
 
   for (const row of rows) {
     const list = out.get(row.itemTypeId);
@@ -377,7 +377,7 @@ async function planEntries(
         throw new AppError(
           'FIELD_READ_ONLY',
           `${readOnlyKeys.map((k) => `"${k}"`).join(', ')} ${readOnlyKeys.length === 1 ? 'is' : 'are'} shared from the model and read-only on a variant. Edit the model to change it everywhere.`,
-          { fieldKeys: readOnlyKeys, variantOfId: item.variantOfId },
+          { fieldKeys: readOnlyKeys, variantParentId: item.variantParentId },
         );
       }
       entries.push({
@@ -472,7 +472,7 @@ function planOne(
           ...before,
           parentId: newParentId,
           path: newRootPath,
-          orderKey: (patch.orderKey as string | undefined) ?? before.orderKey,
+          position: (patch.position as string | undefined) ?? before.position,
         };
       }
       // A descendant keeps its parent and only has its path prefix repointed.
@@ -526,18 +526,18 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
   const lastKeyByParent = new Map<string | null, string | null>();
   for (const parentId of [...parentIds, null]) {
     const [row] = await plan.tx
-      .select({ orderKey: items.orderKey })
+      .select({ position: items.position })
       .from(items)
       .where(
         and(
           eq(items.workspaceId, plan.workspaceId),
           parentId === null ? isNull(items.parentId) : eq(items.parentId, parentId),
-          isNull(items.deletedAt),
+          isNull(items.archivedAt),
         ),
       )
-      .orderBy(sql`${items.orderKey} desc`)
+      .orderBy(sql`${items.position} desc`)
       .limit(1);
-    lastKeyByParent.set(parentId, row?.orderKey ?? null);
+    lastKeyByParent.set(parentId, row?.position ?? null);
   }
 
   const pendingByParent = new Map<string | null, string[]>();
@@ -564,7 +564,7 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
     if (draft.parentId && !parent) {
       throw new AppError('NOT_FOUND', 'The parent item no longer exists.');
     }
-    if (parent && (parent.isVariantModel || parent.variantOfId !== null)) {
+    if (parent && (parent.isVariantModel || parent.variantParentId !== null)) {
       throw new AppError(
         'VARIANT_CONSTRAINT',
         'Products with variants cannot contain other items.',
@@ -585,7 +585,7 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
 
     const cursor = cursorByParent.get(parentKey) ?? 0;
     cursorByParent.set(parentKey, cursor + 1);
-    const orderKey =
+    const position =
       pendingByParent.get(parentKey)?.[cursor] ?? keyBetween(lastKeyByParent.get(parentKey) ?? null, null);
 
     entries.push({
@@ -596,9 +596,9 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
         title: draft.title,
         parentId: draft.parentId ?? null,
         path: childPath(parent?.path ?? null, id),
-        orderKey,
+        position,
         isVariantModel: draft.isVariantModel ?? false,
-        variantOfId: draft.variantOfId ?? null,
+        variantParentId: draft.variantParentId ?? null,
         variantAxisValues: draft.variantAxisValues ?? null,
         values: outcome.values,
         invalidValues: outcome.invalidValues,
@@ -621,7 +621,7 @@ function sharedKeysWrittenOnVariant(
   patch: Record<string, unknown>,
   fields: readonly Field[],
 ): string[] {
-  if (item.variantOfId === null) return [];
+  if (item.variantParentId === null) return [];
   if (input.operation !== 'set_field' && input.operation !== 'clear_field') return [];
 
   const written =
@@ -1007,7 +1007,7 @@ async function refreshItemTypeCounts(
     from (
       select it.id, count(i.id)::int as n
       from item_types it
-      left join items i on i.item_type_id = it.id and i.deleted_at is null
+      left join items i on i.item_type_id = it.id and i.archived_at is null
       where it.workspace_id = ${workspaceId}
         and it.id in ${sql`(${sql.join(typeIds.map((id) => sql`${id}::uuid`), sql`, `)})`}
       group by it.id

@@ -13,7 +13,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { deletedAt, ltree, primaryId, timestamps, workspaceIdColumn } from './_shared';
+import { archivedAt, ltree, primaryId, timestamps, workspaceIdColumn } from './_shared';
 import { itemTypes, fields } from './itemTypes';
 import { users, workspaces } from './workspaces';
 import type { InvalidValue } from '@/types/fields';
@@ -26,7 +26,7 @@ export type InvalidValues = Record<string, InvalidValue>;
  *
  *   - the **work hierarchy** (`parent_id` + `path`),
  *   - **category trees** (many-to-many via `item_tree_nodes`),
- *   - **variant inheritance** (`variant_of_id` / `is_variant_model`).
+ *   - **variant inheritance** (`variant_parent_id` / `is_variant_model`).
  *
  * They are deliberately not the same axis. Collapsing any two of them is the
  * modelling mistake this product exists to avoid.
@@ -47,14 +47,19 @@ export const items = pgTable(
     title: text('title').notNull().default(''),
 
     // --- work hierarchy -----------------------------------------------------
-    parentId: uuid('parent_id').references((): AnyPgColumn => items.id, { onDelete: 'cascade' }),
+    // RESTRICT, not CASCADE: deleting a parent with children must surface the
+    // HAS_CHILDREN disposition, never silently take a subtree with it.
+    parentId: uuid('parent_id').references((): AnyPgColumn => items.id, { onDelete: 'restrict' }),
     /** Self-inclusive ltree path of encoded ancestor ids. See lib/ltree.ts. */
     path: ltree('path').notNull(),
-    orderKey: text('order_key').notNull(),
+    /** Denormalised `nlevel(path) - 1`, for the `depth` filter pseudo-field. */
+    depth: integer('depth').notNull().default(0),
+    /** Fractional index among siblings — an opaque, always-sortable token. */
+    position: text('position').notNull(),
 
     // --- variants -----------------------------------------------------------
     isVariantModel: boolean('is_variant_model').notNull().default(false),
-    variantOfId: uuid('variant_of_id').references((): AnyPgColumn => items.id, {
+    variantParentId: uuid('variant_parent_id').references((): AnyPgColumn => items.id, {
       onDelete: 'cascade',
     }),
     /** `{ region: 'opt_emea', size: 'opt_lg' }` — the axis coordinates. */
@@ -79,39 +84,49 @@ export const items = pgTable(
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
     ...timestamps(),
-    deletedAt: deletedAt(),
+    /** Soft delete (Tech Spec §2.3 calls it archival), 30-day restore window. */
+    archivedAt: archivedAt(),
   },
   (t) => [
     // A variant model is neither a variant child nor a work-hierarchy child.
     check(
       'items_variant_model_is_root',
-      sql`not ${t.isVariantModel} or (${t.parentId} is null and ${t.variantOfId} is null)`,
+      sql`not ${t.isVariantModel} or (${t.parentId} is null and ${t.variantParentId} is null)`,
     ),
     // Variants are not nested inside the work hierarchy (out of scope for v1).
     check(
       'items_variant_not_in_hierarchy',
-      sql`${t.variantOfId} is null or ${t.parentId} is null`,
+      sql`${t.variantParentId} is null or ${t.parentId} is null`,
     ),
 
     // Subtree reads are `path <@ :ancestor`; GiST is the operator's index.
     index('items_path_gist').using('gist', t.path),
     // Substring search over title + searchable fields.
     index('items_search_trgm').using('gin', sql`${t.searchText} gin_trgm_ops`),
+    // Ad-hoc JSONB containment probes outside the projection's hot path.
+    index('items_values_gin').using('gin', sql`${t.effectiveValues} jsonb_path_ops`),
 
     index('items_ws_type_idx')
-      .on(t.workspaceId, t.itemTypeId, t.orderKey)
-      .where(sql`${t.deletedAt} is null`),
-    index('items_parent_idx').on(t.parentId, t.orderKey).where(sql`${t.deletedAt} is null`),
-    index('items_variant_of_idx')
-      .on(t.variantOfId)
-      .where(sql`${t.variantOfId} is not null and ${t.deletedAt} is null`),
+      .on(t.workspaceId, t.itemTypeId, t.position)
+      .where(sql`${t.archivedAt} is null`),
+    // The default keyset ordering (Tech Spec §2.3).
+    index('items_keyset_idx').on(
+      t.workspaceId,
+      t.itemTypeId,
+      sql`${t.createdAt} desc`,
+      sql`${t.id} desc`,
+    ),
+    index('items_parent_idx').on(t.parentId, t.position).where(sql`${t.archivedAt} is null`),
+    index('items_variant_idx')
+      .on(t.variantParentId)
+      .where(sql`${t.variantParentId} is not null and ${t.archivedAt} is null`),
     index('items_assignee_idx')
       .on(t.workspaceId, t.assigneeId)
-      .where(sql`${t.assigneeId} is not null and ${t.deletedAt} is null`),
+      .where(sql`${t.assigneeId} is not null and ${t.archivedAt} is null`),
     // Backs the "incomplete only" toggle without scanning complete items.
     index('items_incomplete_idx')
       .on(t.workspaceId, t.itemTypeId, t.completenessPct)
-      .where(sql`${t.completenessPct} < 100 and ${t.deletedAt} is null`),
+      .where(sql`${t.completenessPct} < 100 and ${t.archivedAt} is null`),
     index('items_updated_idx').on(t.workspaceId, t.updatedAt),
   ],
 );
@@ -151,22 +166,24 @@ export const itemFieldIndex = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.itemId, t.fieldId] }),
-    // Partial indexes: a field only ever populates one value column, so a full
-    // index would be mostly NULLs and several times the size.
+    // Partial indexes on (workspace_id, field_id, value) per Tech Spec §2.4: a
+    // field only ever populates one value column, so a full index would be
+    // mostly NULLs, and leading with workspace_id keeps every probe
+    // tenant-local even before RLS filters.
     index('ifi_field_text_idx')
-      .on(t.fieldId, t.valueText)
+      .on(t.workspaceId, t.fieldId, t.valueText)
       .where(sql`${t.valueText} is not null`),
     index('ifi_field_number_idx')
-      .on(t.fieldId, t.valueNumber)
+      .on(t.workspaceId, t.fieldId, t.valueNumber)
       .where(sql`${t.valueNumber} is not null`),
     index('ifi_field_date_idx')
-      .on(t.fieldId, t.valueDate)
+      .on(t.workspaceId, t.fieldId, t.valueDate)
       .where(sql`${t.valueDate} is not null`),
     index('ifi_field_bool_idx')
-      .on(t.fieldId, t.valueBool)
+      .on(t.workspaceId, t.fieldId, t.valueBool)
       .where(sql`${t.valueBool} is not null`),
     index('ifi_field_uuid_idx')
-      .on(t.fieldId, t.valueUuid)
+      .on(t.workspaceId, t.fieldId, t.valueUuid)
       .where(sql`${t.valueUuid} is not null`),
     index('ifi_field_array_idx')
       .using('gin', t.valueTextArray)
@@ -184,7 +201,7 @@ export const itemsRelations = relations(items, ({ one, many }) => ({
   }),
   children: many(items, { relationName: 'itemHierarchy' }),
   variantModel: one(items, {
-    fields: [items.variantOfId],
+    fields: [items.variantParentId],
     references: [items.id],
     relationName: 'itemVariants',
   }),

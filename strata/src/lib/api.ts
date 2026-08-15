@@ -172,7 +172,7 @@ export const api = {
         '/api/v1/item-types?expand=fields,field_groups',
         { signal },
       ),
-    create: (body: { name: string; presetKey?: string; key?: string; description?: string }) =>
+    create: (body: { label: string; preset?: string; key?: string; description?: string }) =>
       request<ItemTypeWithSchema>('/api/v1/item-types', { method: 'POST', body }),
   },
 

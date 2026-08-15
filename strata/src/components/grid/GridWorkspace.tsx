@@ -94,7 +94,7 @@ export function GridWorkspace(props: GridWorkspaceProps) {
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b bg-[var(--color-surface)] px-3">
-        <h1 className="text-sm font-semibold">{props.itemType.pluralName ?? props.itemType.name}</h1>
+        <h1 className="text-sm font-semibold">{props.itemType.pluralLabel ?? props.itemType.label}</h1>
         <span className="text-xs text-[var(--color-ink-subtle)]">
           {data?.meta.total != null ? `${data.meta.total} total` : ''}
         </span>
@@ -125,7 +125,7 @@ export function GridWorkspace(props: GridWorkspaceProps) {
             {error instanceof Error ? error.message : 'Could not load items.'}
           </p>
         ) : items.length === 0 ? (
-          <EmptyState typeName={props.itemType.name} incompleteOnly={incompleteOnly} />
+          <EmptyState typeName={props.itemType.label} incompleteOnly={incompleteOnly} />
         ) : (
           <Grid
             items={items}

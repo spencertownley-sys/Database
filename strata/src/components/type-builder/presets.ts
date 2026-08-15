@@ -39,8 +39,8 @@ export interface PresetGroup {
 
 export interface ItemTypePreset {
   key: string;
-  name: string;
-  pluralName: string;
+  label: string;
+  pluralLabel: string;
   description: string;
   icon: string;
   color: string;
@@ -73,8 +73,8 @@ const PRIORITY_OPTIONS = options(
 
 const task: ItemTypePreset = {
   key: 'task',
-  name: 'Task',
-  pluralName: 'Tasks',
+  label: 'Task',
+  pluralLabel: 'Tasks',
   description: 'A single piece of work with an owner and a due date.',
   icon: 'check-square',
   color: 'blue',
@@ -125,8 +125,8 @@ const task: ItemTypePreset = {
 
 const clientProject: ItemTypePreset = {
   key: 'client_project',
-  name: 'Client project',
-  pluralName: 'Client projects',
+  label: 'Client project',
+  pluralLabel: 'Client projects',
   description: 'A named engagement with a client, a budget, and a delivery window.',
   icon: 'briefcase',
   color: 'violet',
@@ -182,8 +182,8 @@ const clientProject: ItemTypePreset = {
 
 const campaign: ItemTypePreset = {
   key: 'campaign',
-  name: 'Campaign',
-  pluralName: 'Campaigns',
+  label: 'Campaign',
+  pluralLabel: 'Campaigns',
   description: 'A marketing push across channels, with a window and a budget.',
   icon: 'megaphone',
   color: 'amber',
@@ -263,8 +263,8 @@ const campaign: ItemTypePreset = {
 
 const productVariant: ItemTypePreset = {
   key: 'product_variant',
-  name: 'Product',
-  pluralName: 'Products',
+  label: 'Product',
+  pluralLabel: 'Products',
   description: 'A product with per-region and per-size variants that inherit shared copy.',
   icon: 'package',
   color: 'emerald',
@@ -344,8 +344,8 @@ const productVariant: ItemTypePreset = {
 
 const structuredRecord: ItemTypePreset = {
   key: 'structured_record',
-  name: 'Record',
-  pluralName: 'Records',
+  label: 'Record',
+  pluralLabel: 'Records',
   description: 'A general-purpose catalogued record with an owner, a category, and a status.',
   icon: 'file-text',
   color: 'slate',
@@ -416,8 +416,8 @@ const structuredRecord: ItemTypePreset = {
  */
 const blank: ItemTypePreset = {
   key: 'blank',
-  name: 'Item',
-  pluralName: 'Items',
+  label: 'Item',
+  pluralLabel: 'Items',
   description: 'Start from almost nothing and add your own fields.',
   icon: 'square',
   color: 'slate',
