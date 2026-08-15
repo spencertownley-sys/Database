@@ -134,12 +134,11 @@ export interface CreateFieldInput {
   key?: string;
   type: FieldType;
   config?: FieldConfig;
-  required?: boolean;
+  requiredForCompleteness?: boolean;
   inheritance?: 'shared' | 'variant';
   helpText?: string;
   fieldGroupId?: string | null;
   defaultValue?: unknown;
-  countsTowardCompleteness?: boolean;
   isSearchable?: boolean;
   acknowledgeIncomplete?: boolean;
 }
@@ -158,7 +157,7 @@ export async function createField(
     throw new AppError('FIELD_KEY_TAKEN', `A field with the key "${key}" already exists here.`);
   }
 
-  if (input.required) {
+  if (input.requiredForCompleteness) {
     const [{ count } = { count: 0 }] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(items)
@@ -197,10 +196,9 @@ export async function createField(
       type: input.type,
       config: (input.config ?? {}) as FieldConfig,
       helpText: input.helpText ?? null,
-      required: input.required ?? false,
+      requiredForCompleteness: input.requiredForCompleteness ?? false,
       defaultValue: input.defaultValue ?? null,
       inheritance: input.inheritance ?? 'variant',
-      countsTowardCompleteness: input.countsTowardCompleteness ?? true,
       isSearchable: input.isSearchable ?? false,
       orderKey: orderKey as string,
       createdBy: actorId,
@@ -347,11 +345,10 @@ export async function updateField(
       type: (patch.type ?? field.type) as FieldType,
       config: (patch.config ?? field.config) as FieldConfig,
       helpText: patch.helpText ?? field.helpText,
-      required: patch.required ?? field.required,
+      requiredForCompleteness:
+        patch.requiredForCompleteness ?? field.requiredForCompleteness,
       inheritance: patch.inheritance ?? field.inheritance,
       defaultValue: patch.defaultValue ?? field.defaultValue,
-      countsTowardCompleteness:
-        patch.countsTowardCompleteness ?? field.countsTowardCompleteness,
       isSearchable: patch.isSearchable ?? field.isSearchable,
       fieldGroupId: patch.fieldGroupId === undefined ? field.fieldGroupId : patch.fieldGroupId,
       updatedAt: new Date(),

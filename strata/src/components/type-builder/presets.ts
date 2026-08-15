@@ -21,11 +21,10 @@ export interface PresetField {
   label: string;
   type: FieldType;
   config?: FieldConfig;
-  required?: boolean;
+  requiredForCompleteness?: boolean;
   inheritance?: InheritanceMode;
   isIndexed?: boolean;
   isSearchable?: boolean;
-  countsTowardCompleteness?: boolean;
   helpText?: string;
   defaultValue?: unknown;
   /** Field group key; fields without one land in the default group. */
@@ -91,7 +90,7 @@ const task: ItemTypePreset = {
       label: 'Status',
       type: 'select',
       config: { options: STATUS_OPTIONS },
-      required: true,
+      requiredForCompleteness: true,
       defaultValue: 'todo',
       isIndexed: true,
       group: 'details',
@@ -112,7 +111,6 @@ const task: ItemTypePreset = {
       label: 'Estimate (hours)',
       type: 'number',
       config: { min: 0, precision: 1, unit: 'h' },
-      countsTowardCompleteness: false,
       group: 'planning',
     },
     {
@@ -120,7 +118,6 @@ const task: ItemTypePreset = {
       label: 'Notes',
       type: 'long_text',
       isSearchable: true,
-      countsTowardCompleteness: false,
       group: 'details',
     },
   ],
@@ -141,7 +138,7 @@ const clientProject: ItemTypePreset = {
     { key: 'delivery', label: 'Delivery' },
   ],
   fields: [
-    { key: 'client_name', label: 'Client', type: 'text', required: true, isSearchable: true, isIndexed: true, group: 'client' },
+    { key: 'client_name', label: 'Client', type: 'text', requiredForCompleteness: true, isSearchable: true, isIndexed: true, group: 'client' },
     { key: 'account_lead', label: 'Account lead', type: 'user', isIndexed: true, group: 'client' },
     {
       key: 'status',
@@ -156,7 +153,7 @@ const clientProject: ItemTypePreset = {
           ['closed', 'Closed', 'slate'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       defaultValue: 'scoping',
       isIndexed: true,
       group: 'delivery',
@@ -174,12 +171,11 @@ const clientProject: ItemTypePreset = {
       label: 'Blended rate',
       type: 'currency',
       config: { currencyCode: 'USD', min: 0 },
-      countsTowardCompleteness: false,
       group: 'commercial',
     },
-    { key: 'start_date', label: 'Start date', type: 'date', required: true, isIndexed: true, group: 'delivery' },
+    { key: 'start_date', label: 'Start date', type: 'date', requiredForCompleteness: true, isIndexed: true, group: 'delivery' },
     { key: 'end_date', label: 'End date', type: 'date', isIndexed: true, group: 'delivery' },
-    { key: 'brief_url', label: 'Brief', type: 'url', countsTowardCompleteness: false, group: 'client' },
+    { key: 'brief_url', label: 'Brief', type: 'url', group: 'client' },
     { key: 'scope', label: 'Scope of work', type: 'long_text', isSearchable: true, group: 'client' },
   ],
 };
@@ -212,7 +208,7 @@ const campaign: ItemTypePreset = {
           ['complete', 'Complete', 'violet'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       defaultValue: 'draft',
       isIndexed: true,
       group: 'plan',
@@ -232,12 +228,12 @@ const campaign: ItemTypePreset = {
           ['pr', 'PR'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       isIndexed: true,
       group: 'plan',
     },
-    { key: 'owner', label: 'Owner', type: 'user', required: true, isIndexed: true, group: 'plan' },
-    { key: 'launch_date', label: 'Launch date', type: 'date', required: true, isIndexed: true, group: 'plan' },
+    { key: 'owner', label: 'Owner', type: 'user', requiredForCompleteness: true, isIndexed: true, group: 'plan' },
+    { key: 'launch_date', label: 'Launch date', type: 'date', requiredForCompleteness: true, isIndexed: true, group: 'plan' },
     { key: 'end_date', label: 'End date', type: 'date', isIndexed: true, group: 'plan' },
     {
       key: 'budget',
@@ -254,14 +250,12 @@ const campaign: ItemTypePreset = {
       label: 'Goal impressions',
       type: 'number',
       config: { min: 0 },
-      countsTowardCompleteness: false,
       group: 'measurement',
     },
     {
       key: 'utm_verified',
       label: 'UTMs verified',
       type: 'checkbox',
-      countsTowardCompleteness: false,
       group: 'measurement',
     },
   ],
@@ -283,7 +277,7 @@ const productVariant: ItemTypePreset = {
   ],
   variantAxes: ['region', 'size'],
   fields: [
-    { key: 'sku', label: 'SKU', type: 'text', required: true, inheritance: 'variant', isIndexed: true, isSearchable: true, group: 'identity' },
+    { key: 'sku', label: 'SKU', type: 'text', requiredForCompleteness: true, inheritance: 'variant', isIndexed: true, isSearchable: true, group: 'identity' },
     {
       key: 'region',
       label: 'Region',
@@ -296,7 +290,7 @@ const productVariant: ItemTypePreset = {
           ['latam', 'LATAM'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       inheritance: 'variant',
       isIndexed: true,
       group: 'identity',
@@ -317,7 +311,7 @@ const productVariant: ItemTypePreset = {
       label: 'Price',
       type: 'currency',
       config: { currencyCode: 'USD', min: 0 },
-      required: true,
+      requiredForCompleteness: true,
       inheritance: 'variant',
       isIndexed: true,
       helpText: 'Set per variant — regional pricing rarely matches.',
@@ -329,21 +323,20 @@ const productVariant: ItemTypePreset = {
       type: 'number',
       config: { min: 0 },
       inheritance: 'variant',
-      countsTowardCompleteness: false,
       group: 'commercial',
     },
     {
       key: 'description',
       label: 'Description',
       type: 'long_text',
-      required: true,
+      requiredForCompleteness: true,
       inheritance: 'shared',
       isSearchable: true,
       helpText: 'Written once on the product; every variant inherits it.',
       group: 'content',
     },
     { key: 'material', label: 'Material', type: 'text', inheritance: 'shared', isSearchable: true, group: 'content' },
-    { key: 'care_instructions', label: 'Care instructions', type: 'long_text', inheritance: 'shared', countsTowardCompleteness: false, group: 'content' },
+    { key: 'care_instructions', label: 'Care instructions', type: 'long_text', inheritance: 'shared', group: 'content' },
     { key: 'hero_image', label: 'Hero image', type: 'url', inheritance: 'shared', group: 'content' },
     { key: 'launch_date', label: 'Launch date', type: 'date', inheritance: 'shared', isIndexed: true, group: 'commercial' },
   ],
@@ -363,7 +356,7 @@ const structuredRecord: ItemTypePreset = {
     { key: 'governance', label: 'Governance' },
   ],
   fields: [
-    { key: 'reference', label: 'Reference', type: 'text', required: true, isIndexed: true, isSearchable: true, group: 'summary' },
+    { key: 'reference', label: 'Reference', type: 'text', requiredForCompleteness: true, isIndexed: true, isSearchable: true, group: 'summary' },
     {
       key: 'category',
       label: 'Category',
@@ -377,12 +370,12 @@ const structuredRecord: ItemTypePreset = {
           ['other', 'Other'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       isIndexed: true,
       group: 'summary',
     },
-    { key: 'summary', label: 'Summary', type: 'long_text', required: true, isSearchable: true, group: 'summary' },
-    { key: 'owner', label: 'Owner', type: 'user', required: true, isIndexed: true, group: 'governance' },
+    { key: 'summary', label: 'Summary', type: 'long_text', requiredForCompleteness: true, isSearchable: true, group: 'summary' },
+    { key: 'owner', label: 'Owner', type: 'user', requiredForCompleteness: true, isIndexed: true, group: 'governance' },
     {
       key: 'status',
       label: 'Status',
@@ -395,7 +388,7 @@ const structuredRecord: ItemTypePreset = {
           ['retired', 'Retired', 'slate'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       defaultValue: 'draft',
       isIndexed: true,
       group: 'governance',
@@ -409,11 +402,10 @@ const structuredRecord: ItemTypePreset = {
       config: {
         options: options(['confidential', 'Confidential'], ['external', 'External'], ['legal', 'Legal review']),
       },
-      countsTowardCompleteness: false,
       group: 'summary',
     },
-    { key: 'source_url', label: 'Source', type: 'url', countsTowardCompleteness: false, group: 'summary' },
-    { key: 'verified', label: 'Verified', type: 'checkbox', countsTowardCompleteness: false, group: 'governance' },
+    { key: 'source_url', label: 'Source', type: 'url', group: 'summary' },
+    { key: 'verified', label: 'Verified', type: 'checkbox', group: 'governance' },
   ],
 };
 
@@ -441,7 +433,7 @@ const blank: ItemTypePreset = {
       isIndexed: true,
       group: 'details',
     },
-    { key: 'notes', label: 'Notes', type: 'long_text', isSearchable: true, countsTowardCompleteness: false, group: 'details' },
+    { key: 'notes', label: 'Notes', type: 'long_text', isSearchable: true, group: 'details' },
   ],
 };
 

@@ -221,7 +221,6 @@ export function computeDerived(
     effectiveValues,
     fields,
     invalidValues: snapshot.invalidValues,
-    title: snapshot.title,
   });
 
   return {

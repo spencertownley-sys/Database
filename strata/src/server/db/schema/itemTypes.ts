@@ -111,7 +111,13 @@ export const fields = pgTable(
     type: fieldTypeEnum('type').notNull().$type<FieldType>(),
     config: jsonb('config').$type<FieldConfig>().notNull().default({}),
     helpText: text('help_text'),
-    required: boolean('required').notNull().default(false),
+    /**
+     * The one completeness flag (Tech Spec §2.2): an item's completeness is
+     * filled-required ÷ total-required, nothing else. There is deliberately no
+     * second "counts toward completeness" knob — PRD §4.7 defines the metric
+     * over required fields only.
+     */
+    requiredForCompleteness: boolean('required_for_completeness').notNull().default(false),
     defaultValue: jsonb('default_value'),
     /**
      * `'shared'`  — owned by the model, read-only on variants (Tech Spec §2.5).
@@ -129,8 +135,6 @@ export const fields = pgTable(
     isIndexed: boolean('is_indexed').notNull().default(false),
     /** Contributes to `items.search_text`. */
     isSearchable: boolean('is_searchable').notNull().default(false),
-    /** Counts toward completeness even when not `required`. */
-    countsTowardCompleteness: boolean('counts_toward_completeness').notNull().default(true),
     orderKey: text('order_key').notNull(),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     ...timestamps(),

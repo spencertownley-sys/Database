@@ -127,12 +127,11 @@ export const createFieldSchema = z.object({
     .optional(),
   type: z.enum(FIELD_TYPES),
   config: z.record(z.unknown()).default({}),
-  required: z.boolean().default(false),
+  requiredForCompleteness: z.boolean().default(false),
   inheritance: z.enum(['shared', 'variant']).default('variant'),
   helpText: z.string().max(500).optional(),
   fieldGroupId: uuidSchema.nullable().optional(),
   defaultValue: z.unknown().optional(),
-  countsTowardCompleteness: z.boolean().default(true),
   isSearchable: z.boolean().default(false),
   /**
    * Required when adding a required field to a type that already has items:

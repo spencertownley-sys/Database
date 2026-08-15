@@ -147,8 +147,7 @@ interface SeededSchema {
     key: string;
     type: (typeof ITEM_TYPE_PRESETS)[number]['fields'][number]['type'];
     config: Record<string, unknown>;
-    required: boolean;
-    countsTowardCompleteness: boolean;
+    requiredForCompleteness: boolean;
     inheritance: 'shared' | 'variant';
     isIndexed: boolean;
     isSearchable: boolean;
@@ -269,12 +268,11 @@ async function seedItemTypeSchema(
     type: f.type,
     config: (f.config ?? {}) as Record<string, unknown>,
     helpText: f.helpText ?? null,
-    required: f.required ?? false,
+    requiredForCompleteness: f.requiredForCompleteness ?? false,
     defaultValue: f.defaultValue ?? null,
     inheritance: f.inheritance ?? ('variant' as const),
     isIndexed: f.isIndexed ?? false,
     isSearchable: f.isSearchable ?? false,
-    countsTowardCompleteness: f.countsTowardCompleteness ?? true,
     orderKey: fieldOrder[i] as string,
     createdBy: actorId,
   }));
@@ -290,8 +288,7 @@ async function seedItemTypeSchema(
       key: f.key,
       type: f.type,
       config: f.config,
-      required: f.required,
-      countsTowardCompleteness: f.countsTowardCompleteness,
+      requiredForCompleteness: f.requiredForCompleteness,
       inheritance: f.inheritance,
       isIndexed: f.isIndexed,
       isSearchable: f.isSearchable,
@@ -312,8 +309,7 @@ function finalize(
     key: f.key,
     type: f.type,
     config: f.config as never,
-    required: f.required,
-    countsTowardCompleteness: f.countsTowardCompleteness,
+    requiredForCompleteness: f.requiredForCompleteness,
     inheritance: f.inheritance,
     isSearchable: f.isSearchable,
   }));
@@ -326,7 +322,6 @@ function finalize(
   const completeness = computeCompleteness({
     effectiveValues,
     fields: fieldDefs,
-    title: item.title,
   });
 
   return {
