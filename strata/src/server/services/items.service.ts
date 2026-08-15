@@ -21,7 +21,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Tx } from '@/server/db';
 import { items, itemFieldIndex, type Item, type ItemValues, type InvalidValues } from '@/server/db/schema/items';
 import { itemTreeNodes, treeNodes } from '@/server/db/schema/trees';
-import type { Field } from '@/server/db/schema/itemTypes';
+import { itemTypes, type Field } from '@/server/db/schema/itemTypes';
 import { AppError } from '@/server/lib/errors';
 import { assertDepthAfterMove, assertNoCycle, childPath, pathDepth } from '@/server/lib/ltree';
 import { computeCompleteness } from './completeness.service';
@@ -210,10 +210,11 @@ export function computeDerived(
   snapshot: ItemSnapshot,
   fields: readonly Field[],
   modelValues: ItemValues | null,
+  variantAxes: readonly string[] = [],
 ): DerivedValues {
   const effectiveValues =
     snapshot.variantOfId && modelValues
-      ? computeEffectiveValues(modelValues, snapshot.values, fields).values
+      ? computeEffectiveValues(modelValues, snapshot.values, fields, variantAxes).values
       : ownEffectiveValues(snapshot.values, fields);
 
   const completeness = computeCompleteness({
@@ -604,6 +605,17 @@ export async function recomputeDerived(
     ...modelRows.map((m) => [m.id, m.values] as const),
   ]);
 
+  // Axis fields resolve to the variant's own value regardless of inheritance,
+  // so resolution needs each type's declared axes alongside its fields.
+  const typeIdsInBatch = [...new Set(ordered.map((i) => i.itemTypeId))];
+  const axisRows = typeIdsInBatch.length
+    ? await tx
+        .select({ id: itemTypes.id, variantAxes: itemTypes.variantAxes })
+        .from(itemTypes)
+        .where(and(eq(itemTypes.workspaceId, ctx.workspaceId), inArray(itemTypes.id, typeIdsInBatch)))
+    : [];
+  const axesByType = new Map(axisRows.map((r) => [r.id, r.variantAxes]));
+
   const projectionTargets: Array<{
     itemId: string;
     itemTypeId: string;
@@ -617,6 +629,7 @@ export async function recomputeDerived(
       snapshotOf(item),
       fields,
       item.variantOfId ? (modelValues.get(item.variantOfId) ?? null) : null,
+      axesByType.get(item.itemTypeId) ?? [],
     );
 
     await tx

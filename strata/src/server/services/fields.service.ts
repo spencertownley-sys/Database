@@ -199,7 +199,7 @@ export async function createField(
       helpText: input.helpText ?? null,
       required: input.required ?? false,
       defaultValue: input.defaultValue ?? null,
-      inheritance: input.inheritance ?? 'shared',
+      inheritance: input.inheritance ?? 'variant',
       countsTowardCompleteness: input.countsTowardCompleteness ?? true,
       isSearchable: input.isSearchable ?? false,
       orderKey: orderKey as string,

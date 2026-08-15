@@ -234,7 +234,7 @@ async function applyPresetSchema(
             helpText: f.helpText ?? null,
             required: f.required ?? false,
             defaultValue: f.defaultValue ?? null,
-            inheritance: f.inheritance ?? 'shared',
+            inheritance: f.inheritance ?? 'variant',
             isIndexed: f.isIndexed ?? false,
             isSearchable: f.isSearchable ?? false,
             countsTowardCompleteness: f.countsTowardCompleteness ?? true,

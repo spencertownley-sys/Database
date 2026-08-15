@@ -1,11 +1,27 @@
 /**
- * Variant inheritance.
+ * Variant inheritance — the Tech Spec §2.5 resolution algorithm.
  *
  * A **model** owns the canonical values. A **variant** is a child row keyed by
  * a coordinate on one or more axes (`{ region: 'emea', size: 'lg' }`) that
  * resolves its values against the model at write time.
  *
- * Two rules define the whole system:
+ * The two inheritance modes, exactly as §2.5 defines them:
+ *
+ *   - `'shared'`  — owned by the model, **read-only on every variant**. The
+ *     effective value is always the model's; the write path refuses a variant
+ *     write with `FIELD_READ_ONLY`. This is the "change the tagline once and
+ *     all fourteen regions update" mode, and it only works if a variant cannot
+ *     quietly pin its own copy.
+ *
+ *   - `'variant'` — owned per variant, **inheriting the model's value until
+ *     overridden**. The model's value is the default; a variant that writes
+ *     the key owns it from then on.
+ *
+ * A final pass forces every declared axis field to the variant's own value
+ * regardless of inheritance mode — a variant whose Region cell showed the
+ * model's region would not be identifiable as itself.
+ *
+ * Two rules define the rest of the system:
  *
  *  1. **Override is key presence, not a flag.** `variant.values[key]` existing
  *     *is* the override; deleting the key reverts to the model. An
@@ -20,11 +36,6 @@
  *     stored. That makes propagation a real job with a real duration — above
  *     `VARIANT_SYNC_THRESHOLD` it runs asynchronously, and the UI must say so
  *     rather than implying the write finished.
- *
- * `inheritance: 'shared'` fields fall through to the model unless overridden.
- * `inheritance: 'variant'` fields never fall through: marking a field
- * per-variant is a statement that the model's value is not meaningful for a
- * variant, so showing it as inherited would be a lie the grid then filters on.
  */
 
 import type { Field } from '@/server/db/schema/itemTypes';
@@ -43,47 +54,68 @@ export interface EffectiveValueResolution {
 }
 
 /**
- * Resolves what a variant actually shows.
+ * Resolves what a variant actually shows — Tech Spec §2.5, verbatim.
  *
  * `modelValues` is the model's own `values` (not its `effective_values` — a
  * model has no parent, so they are equal, and reading the derived column here
  * would make the function order-dependent on the model's own recompute).
+ *
+ * `variantAxes` is the item type's declared axis field keys. Axis values are
+ * always the variant's own, whatever the axis field's inheritance mode says.
+ *
+ * A resolved value of `null`/`undefined` is stored as an absent key rather
+ * than an explicit null: everything downstream (`isEmpty`, the projection,
+ * completeness) treats the two identically, and one canonical shape is what
+ * lets undo compare snapshots byte-for-byte.
  */
 export function computeEffectiveValues(
   modelValues: ItemValues,
   variantValues: ItemValues,
   fields: readonly Pick<Field, 'key' | 'inheritance'>[],
+  variantAxes: readonly string[] = [],
 ): EffectiveValueResolution {
   const values: ItemValues = {};
   const inheritedKeys: string[] = [];
   const overriddenKeys: string[] = [];
+  const axisKeys = new Set(variantAxes);
+
+  const put = (key: string, value: unknown, bucket?: string[]): void => {
+    if (value === undefined || value === null) return;
+    values[key] = value;
+    bucket?.push(key);
+  };
 
   for (const field of fields) {
     const key = field.key;
-    const hasOwn = Object.prototype.hasOwnProperty.call(variantValues, key);
+    if (axisKeys.has(key)) continue; // the axis pass below owns these
 
-    if (field.inheritance === 'variant') {
-      // Never inherited. An absent value is genuinely absent, and completeness
-      // is expected to reflect that — "which variants still need a local
-      // price" is the question this mode exists to answer.
-      if (hasOwn && variantValues[key] !== undefined) {
-        values[key] = variantValues[key];
-        overriddenKeys.push(key);
-      }
+    if (field.inheritance === 'shared') {
+      // Always the model's. A variant's own copy — if some historical write
+      // left one behind — is ignored, not merged: shared means shared.
+      put(key, modelValues[key], inheritedKeys);
       continue;
     }
 
-    if (hasOwn && variantValues[key] !== undefined) {
-      values[key] = variantValues[key];
-      overriddenKeys.push(key);
-    } else if (
-      Object.prototype.hasOwnProperty.call(modelValues, key) &&
-      modelValues[key] !== undefined &&
-      modelValues[key] !== null
+    // 'variant': the variant's value when the key is present (key presence
+    // *is* the override), otherwise inherit whatever the model has. §2.5
+    // writes this arm as `item.values[key] ?? model.values[key]` — a nullish
+    // coalesce — so a null left on the variant is "no override", not an
+    // override-to-empty. The write path never stores null (clearing deletes
+    // the key), so this branch only matters for defensive completeness.
+    if (
+      Object.prototype.hasOwnProperty.call(variantValues, key) &&
+      variantValues[key] !== undefined &&
+      variantValues[key] !== null
     ) {
-      values[key] = modelValues[key];
-      inheritedKeys.push(key);
+      put(key, variantValues[key], overriddenKeys);
+    } else {
+      put(key, modelValues[key], inheritedKeys);
     }
+  }
+
+  // Axis values always come from the variant itself.
+  for (const key of axisKeys) {
+    put(key, variantValues[key]);
   }
 
   return { values, inheritedKeys, overriddenKeys };
@@ -110,8 +142,10 @@ export function isInherited(
   key: string,
   variantValues: ItemValues,
   field: Pick<Field, 'inheritance'>,
+  variantAxes: readonly string[] = [],
 ): boolean {
-  if (field.inheritance === 'variant') return false;
+  if (variantAxes.includes(key)) return false; // an axis value is the variant's identity
+  if (field.inheritance === 'shared') return true; // read-only, always the model's
   return !Object.prototype.hasOwnProperty.call(variantValues, key);
 }
 
@@ -176,22 +210,30 @@ export function axisCoordinateKey(coordinate: Record<string, string>): string {
 }
 
 /**
- * Which variants a model write actually needs to touch. A shared field that
- * every variant overrides propagates to nobody, and computing that up front
- * keeps a 200-variant model from enqueueing 200 no-op writes.
+ * Which variants a model write actually needs to touch.
+ *
+ * A `shared` field flows to every variant unconditionally — variants cannot
+ * override it. A `variant`-inheritance field flows only to variants that have
+ * not overridden it, and an axis field flows to nobody (the axis pass always
+ * takes the variant's own value). Computing this up front keeps a 200-variant
+ * model from enqueueing 200 no-op writes.
  */
 export function variantsAffectedByModelChange(
   changedKeys: readonly string[],
   fieldsByKey: ReadonlyMap<string, Pick<Field, 'key' | 'inheritance'>>,
   variants: ReadonlyArray<{ id: string; values: ItemValues }>,
+  variantAxes: readonly string[] = [],
 ): string[] {
-  const sharedChanged = changedKeys.filter(
-    (k) => fieldsByKey.get(k)?.inheritance !== 'variant',
-  );
-  if (sharedChanged.length === 0) return [];
+  const axisKeys = new Set(variantAxes);
+  const flowing = changedKeys.filter((k) => !axisKeys.has(k) && fieldsByKey.has(k));
+  if (flowing.length === 0) return [];
   return variants
     .filter((v) =>
-      sharedChanged.some((k) => !Object.prototype.hasOwnProperty.call(v.values, k)),
+      flowing.some(
+        (k) =>
+          fieldsByKey.get(k)?.inheritance === 'shared' ||
+          !Object.prototype.hasOwnProperty.call(v.values, k),
+      ),
     )
     .map((v) => v.id);
 }

@@ -367,6 +367,29 @@ async function planEntries(
       continue;
     }
 
+    // Tech Spec §2.5 / API Design §4: a `shared` field is owned by the model
+    // and read-only on every variant. A single-item write is refused with
+    // FIELD_READ_ONLY; in a bulk edit the variant is skipped with a reason, so
+    // the rest of the selection still applies and the preview says why.
+    const readOnlyKeys = sharedKeysWrittenOnVariant(item, input, patch, fields);
+    if (readOnlyKeys.length > 0) {
+      if (loaded.length === 1) {
+        throw new AppError(
+          'FIELD_READ_ONLY',
+          `${readOnlyKeys.map((k) => `"${k}"`).join(', ')} ${readOnlyKeys.length === 1 ? 'is' : 'are'} shared from the model and read-only on a variant. Edit the model to change it everywhere.`,
+          { fieldKeys: readOnlyKeys, variantOfId: item.variantOfId },
+        );
+      }
+      entries.push({
+        before,
+        after: before,
+        title: item.title,
+        skipped: true,
+        skipReason: 'Shared fields are read-only on a variant — edit the model instead.',
+      });
+      continue;
+    }
+
     const after = planOne(plan, input, item, before, fields, patch);
     entries.push({
       before,
@@ -589,6 +612,25 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
   }
 
   return entries;
+}
+
+/** The `shared`-inheritance keys a set/clear would write on a variant, if any. */
+function sharedKeysWrittenOnVariant(
+  item: LoadedItem,
+  input: ChangeSetInput,
+  patch: Record<string, unknown>,
+  fields: readonly Field[],
+): string[] {
+  if (item.variantOfId === null) return [];
+  if (input.operation !== 'set_field' && input.operation !== 'clear_field') return [];
+
+  const written =
+    input.operation === 'set_field'
+      ? Object.keys((patch.values ?? {}) as Record<string, unknown>)
+      : ((patch.fieldKeys ?? []) as string[]);
+
+  const byKey = new Map(fields.map((f) => [f.key, f]));
+  return written.filter((key) => byKey.get(key)?.inheritance === 'shared');
 }
 
 function permissionActionFor(operation: ChangeOperation) {

@@ -1,0 +1,1 @@
+ALTER TABLE "fields" ALTER COLUMN "inheritance" SET DEFAULT 'variant';

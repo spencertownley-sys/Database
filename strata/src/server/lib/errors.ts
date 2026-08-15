@@ -48,6 +48,8 @@ export const ERROR_CODES = {
   ITEM_TYPE_IN_USE: 409,
 
   // --- variants -------------------------------------------------------------
+  /** Writing a `shared`-inheritance field on a variant (Tech Spec §2.5). */
+  FIELD_READ_ONLY: 422,
   VARIANT_LIMIT_EXCEEDED: 422,
   VARIANT_CANNOT_HAVE_CHILDREN: 422,
   VARIANT_MODEL_CANNOT_BE_NESTED: 422,

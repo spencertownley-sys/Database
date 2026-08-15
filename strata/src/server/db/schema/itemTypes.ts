@@ -113,7 +113,13 @@ export const fields = pgTable(
     helpText: text('help_text'),
     required: boolean('required').notNull().default(false),
     defaultValue: jsonb('default_value'),
-    inheritance: inheritanceEnum('inheritance').notNull().default('shared').$type<InheritanceMode>(),
+    /**
+     * `'shared'`  — owned by the model, read-only on variants (Tech Spec §2.5).
+     * `'variant'` — owned per variant, inheriting the model's value until
+     * overridden. The default is `'variant'`: a new field starts overridable,
+     * and locking it to the model is the deliberate act.
+     */
+    inheritance: inheritanceEnum('inheritance').notNull().default('variant').$type<InheritanceMode>(),
     /**
      * Whether values are projected into `item_field_index`. Flipped on
      * automatically the first time a field is filtered or sorted, which

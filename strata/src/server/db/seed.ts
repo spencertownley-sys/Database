@@ -271,7 +271,7 @@ async function seedItemTypeSchema(
     helpText: f.helpText ?? null,
     required: f.required ?? false,
     defaultValue: f.defaultValue ?? null,
-    inheritance: f.inheritance ?? ('shared' as const),
+    inheritance: f.inheritance ?? ('variant' as const),
     isIndexed: f.isIndexed ?? false,
     isSearchable: f.isSearchable ?? false,
     countsTowardCompleteness: f.countsTowardCompleteness ?? true,
@@ -319,7 +319,8 @@ function finalize(
   }));
 
   const effectiveValues = modelValues
-    ? computeEffectiveValues(modelValues, item.values, fieldDefs).values
+    ? computeEffectiveValues(modelValues, item.values, fieldDefs, schemaDef.preset.variantAxes ?? [])
+        .values
     : ownEffectiveValues(item.values, fieldDefs);
 
   const completeness = computeCompleteness({
@@ -683,6 +684,9 @@ async function seedWorkspace(
         care_instructions: 'Machine wash cold. Do not tumble dry.',
         launch_date: isoDate(45 + i * 14),
         hero_image: 'https://example.com/hero.jpg',
+        // Base price on the model: `price` is `variant`-inheritance, so
+        // variants inherit this until they deliberately override it.
+        price: 90 + i * 10,
       };
 
       pending.push(
@@ -722,13 +726,11 @@ async function seedWorkspace(
             region,
             size,
           };
-          if (maybe(0.85)) variantValues.price = 80 + Math.floor(rand() * 12) * 5;
+          // Most variants inherit the model's base price; a handful override
+          // it, so propagation tests have values that must *not* move when
+          // the model is edited.
+          if (maybe(0.35)) variantValues.price = 80 + Math.floor(rand() * 12) * 5;
           if (maybe(0.6)) variantValues.stock_on_hand = Math.floor(rand() * 400);
-          // A handful of genuine overrides, so propagation tests have
-          // something that must *not* move.
-          if (maybe(0.15)) {
-            variantValues.description = `${productTitle} — ${region.toUpperCase()} edition with regional trim.`;
-          }
 
           pending.push(
             finalize(
