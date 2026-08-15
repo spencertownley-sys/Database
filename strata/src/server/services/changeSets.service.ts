@@ -195,7 +195,7 @@ async function resolveTargetIds(
 
     case 'subtree': {
       if (!target.rootItemId) {
-        throw new AppError('VALIDATION_FAILED', 'A subtree target needs a root item.');
+        throw new AppError('VALIDATION_ERROR', 'A subtree target needs a root item.');
       }
       const ids = await loadSubtreeIds(tx, workspaceId, target.rootItemId);
       return target.includeDescendants === false ? [target.rootItemId] : ids;
@@ -209,7 +209,7 @@ async function resolveTargetIds(
     }
 
     default:
-      throw new AppError('VALIDATION_FAILED', 'Unrecognised change target.');
+      throw new AppError('VALIDATION_ERROR', 'Unrecognised change target.');
   }
 }
 
@@ -504,14 +504,14 @@ function planOne(
       return before;
 
     default:
-      throw new AppError('VALIDATION_FAILED', `Unsupported operation "${input.operation}".`);
+      throw new AppError('VALIDATION_ERROR', `Unsupported operation "${input.operation}".`);
   }
 }
 
 async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<PlannedEntry[]> {
   const drafts = (input.target.drafts ?? []) as ItemDraft[];
   if (drafts.length === 0) {
-    throw new AppError('VALIDATION_FAILED', 'Nothing to create.');
+    throw new AppError('VALIDATION_ERROR', 'Nothing to create.');
   }
 
   const defaultTypeId = input.itemTypeId;
@@ -554,7 +554,7 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
 
   for (const draft of drafts) {
     const itemTypeId = draft.itemTypeId ?? defaultTypeId;
-    if (!itemTypeId) throw new AppError('VALIDATION_FAILED', 'Creating an item needs an item type.');
+    if (!itemTypeId) throw new AppError('VALIDATION_ERROR', 'Creating an item needs an item type.');
 
     const fields = plan.fieldsByType.get(itemTypeId) ?? [];
     const id = crypto.randomUUID();
@@ -566,7 +566,7 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
     }
     if (parent && (parent.isVariantModel || parent.variantOfId !== null)) {
       throw new AppError(
-        'VARIANT_MODEL_CANNOT_BE_NESTED',
+        'VARIANT_CONSTRAINT',
         'Products with variants cannot contain other items.',
       );
     }
@@ -761,7 +761,7 @@ export async function previewChangeSet(
 
   if (targetIds.length > MAX_ITEMS_PER_CHANGE_SET) {
     throw new AppError(
-      'BULK_LIMIT_EXCEEDED',
+      'TARGET_TOO_LARGE',
       `That would change ${targetIds.length.toLocaleString()} items. Narrow the selection to ${MAX_ITEMS_PER_CHANGE_SET.toLocaleString()} or fewer.`,
       { count: targetIds.length, limit: MAX_ITEMS_PER_CHANGE_SET },
     );
@@ -792,7 +792,7 @@ export async function previewChangeSet(
   if (input.operation === 'reparent') {
     const rootId = (patch.itemId as string | undefined) ?? input.target.itemIds?.[0];
     const root = loaded.find((i) => i.id === rootId);
-    if (!root) throw new AppError('VALIDATION_FAILED', 'The item being moved is not in the selection.');
+    if (!root) throw new AppError('VALIDATION_ERROR', 'The item being moved is not in the selection.');
     const newParentId = (patch.parentId ?? null) as string | null;
     let newParentPath: string | null = null;
     if (newParentId) {
@@ -842,7 +842,7 @@ export async function previewChangeSet(
     })
     .returning();
 
-  if (!created) throw new AppError('INTERNAL', 'Could not create the change set.');
+  if (!created) throw new AppError('INTERNAL_ERROR', 'Could not create the change set.');
 
   if (planned.length > 0) {
     const rows = planned.map((entry, seq) => ({
@@ -881,11 +881,11 @@ export async function commitChangeSet(
   const changeSet = await getChangeSet(tx, ctx.workspaceId, changeSetId);
 
   if (changeSet.status === 'committed') {
-    throw new AppError('CHANGE_SET_ALREADY_COMMITTED', 'That change has already been applied.');
+    throw new AppError('ALREADY_COMMITTED', 'That change has already been applied.');
   }
   if (changeSet.status !== 'preview' && changeSet.status !== 'committing') {
     throw new AppError(
-      'CHANGE_SET_NOT_PREVIEW',
+      'ALREADY_COMMITTED',
       `This change is ${changeSet.status} and can no longer be applied.`,
     );
   }
@@ -985,7 +985,7 @@ export async function commitChangeSet(
     .where(eq(changeSets.id, changeSetId))
     .returning();
 
-  if (!committed) throw new AppError('INTERNAL', 'Change set vanished mid-commit.');
+  if (!committed) throw new AppError('INTERNAL_ERROR', 'Change set vanished mid-commit.');
 
   return {
     changeSet: committed,
@@ -1028,11 +1028,11 @@ export async function undoChangeSet(
   const original = await getChangeSet(tx, ctx.workspaceId, changeSetId);
 
   if (original.status === 'undone') {
-    throw new AppError('CHANGE_SET_ALREADY_UNDONE', 'That change has already been undone.');
+    throw new AppError('ALREADY_UNDONE', 'That change has already been undone.');
   }
   if (original.status !== 'committed') {
     throw new AppError(
-      'CHANGE_SET_NOT_UNDOABLE',
+      'OPERATION_NOT_APPLICABLE',
       `A change that is ${original.status} cannot be undone.`,
     );
   }
@@ -1074,7 +1074,7 @@ export async function undoChangeSet(
     })
     .returning();
 
-  if (!inverse) throw new AppError('INTERNAL', 'Could not create the undo change set.');
+  if (!inverse) throw new AppError('INTERNAL_ERROR', 'Could not create the undo change set.');
 
   if (live.length > 0) {
     // The inverse is a plain swap. Undo is applied in reverse order so that a
@@ -1171,7 +1171,7 @@ export async function discardPreview(
 ): Promise<void> {
   const changeSet = await getChangeSet(tx, workspaceId, changeSetId);
   if (changeSet.status !== 'preview') {
-    throw new AppError('CHANGE_SET_NOT_PREVIEW', 'Only an unapplied preview can be discarded.');
+    throw new AppError('ALREADY_COMMITTED', 'Only an unapplied preview can be discarded.');
   }
   await tx.delete(changeSets).where(eq(changeSets.id, changeSetId));
 }

@@ -259,7 +259,7 @@ export async function reparentSubtree(
 
   if (moving.variantOfId !== null) {
     throw new AppError(
-      'VARIANT_CANNOT_HAVE_CHILDREN',
+      'VARIANT_CONSTRAINT',
       'Variants live outside the work hierarchy. Move the product instead.',
     );
   }
@@ -275,12 +275,12 @@ export async function reparentSubtree(
     if (!parent) throw new AppError('NOT_FOUND', 'The destination item no longer exists.');
     if (parent.isVariantModel) {
       throw new AppError(
-        'VARIANT_MODEL_CANNOT_BE_NESTED',
+        'VARIANT_CONSTRAINT',
         'A product with variants cannot contain other items.',
       );
     }
     if (parent.variantOfId !== null) {
-      throw new AppError('VARIANT_CANNOT_HAVE_CHILDREN', 'A variant cannot contain other items.');
+      throw new AppError('VARIANT_CONSTRAINT', 'A variant cannot contain other items.');
     }
     newParentPath = parent.path;
     assertNoCycle(moving.path, newParentPath);

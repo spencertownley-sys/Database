@@ -74,7 +74,7 @@ function decodeCursor(cursor: string): CursorPayload {
     if (!Array.isArray(parsed.v) || typeof parsed.id !== 'string') throw new Error('shape');
     return parsed;
   } catch {
-    throw new AppError('VALIDATION_FAILED', 'That page cursor is not valid. Start from page one.');
+    throw new AppError('VALIDATION_ERROR', 'That page cursor is not valid. Start from page one.');
   }
 }
 
@@ -214,6 +214,14 @@ function buildWhere(
     )`);
   }
 
+  if (query.parentId) {
+    parts.push(sql`${itemRef}.parent_id = ${query.parentId}::uuid`);
+  }
+
+  if (query.variantParentId) {
+    parts.push(sql`${itemRef}.variant_of_id = ${query.variantParentId}::uuid`);
+  }
+
   if (query.treeNodeId) {
     parts.push(
       query.treeIncludeDescendants
@@ -276,6 +284,9 @@ const SELECT_COLUMNS = sql`
 // provider
 // ---------------------------------------------------------------------------
 
+/** Above this, `total` is reported as `null` (API Design §1.2). */
+export const TOTAL_COUNT_CAP = 10_000;
+
 export class PostgresSearchProvider implements SearchProvider {
   async search(
     tx: Tx,
@@ -300,7 +311,14 @@ export class PostgresSearchProvider implements SearchProvider {
       limit ${limit + 1}
     `);
 
-    const list = [...rows] as unknown as Item[];
+    // Raw `tx.execute` rows carry timestamps as Postgres strings; the wire
+    // contract is RFC 3339, which `toWire` produces from Date instances.
+    const list = ([...rows] as unknown as Item[]).map((item) => ({
+      ...item,
+      createdAt: new Date(item.createdAt),
+      updatedAt: new Date(item.updatedAt),
+      deletedAt: item.deletedAt ? new Date(item.deletedAt) : null,
+    }));
     const hasMore = list.length > limit;
     const page = hasMore ? list.slice(0, limit) : list;
 
@@ -319,12 +337,17 @@ export class PostgresSearchProvider implements SearchProvider {
     workspaceId: string,
     fields: readonly Field[],
     query: Omit<SearchQuery, 'limit' | 'cursor'>,
-  ): Promise<number> {
+  ): Promise<number | null> {
     const where = buildWhere(workspaceId, fields, query);
+    // Bounded: past 10,000 an exact count reads rows nobody will page through,
+    // and the API contract (§1.2) returns `total: null` instead.
     const rows = await tx.execute(sql`
-      select count(*)::int as n from items ${sql.identifier(ITEM_ALIAS)} where ${where}
+      select count(*)::int as n from (
+        select 1 from items ${sql.identifier(ITEM_ALIAS)} where ${where} limit ${TOTAL_COUNT_CAP + 1}
+      ) bounded
     `);
-    return Number(([...rows][0] as { n: number } | undefined)?.n ?? 0);
+    const n = Number(([...rows][0] as { n: number } | undefined)?.n ?? 0);
+    return n > TOTAL_COUNT_CAP ? null : n;
   }
 
   /**
@@ -355,19 +378,19 @@ export class PostgresSearchProvider implements SearchProvider {
           groupExpr = sql`${itemRef}.parent_id::text`;
           break;
         default:
-          throw new AppError('VALIDATION_FAILED', `Cannot group by "${group.field}".`);
+          throw new AppError('VALIDATION_ERROR', `Cannot group by "${group.field}".`);
       }
     } else {
       const field = fields.find((f) => f.key === group.field);
       if (!field) {
-        throw new AppError('VALIDATION_FAILED', `Cannot group by "${group.field}" — no such field.`);
+        throw new AppError('VALIDATION_ERROR', `Cannot group by "${group.field}" — no such field.`);
       }
       const column = indexColumnFor(field.type, field.config);
       if (column === 'text_array') {
         // A multi-select item belongs to several buckets at once; the grid
         // treats that as unsupported rather than silently duplicating rows.
         throw new AppError(
-          'VALIDATION_FAILED',
+          'VALIDATION_ERROR',
           `"${field.label}" allows several values per item, so it cannot group rows.`,
         );
       }
@@ -441,7 +464,7 @@ export class PostgresSearchProvider implements SearchProvider {
     const ids = ([...rows] as Array<{ id: string }>).map((r) => r.id);
     if (ids.length > max) {
       throw new AppError(
-        'BULK_LIMIT_EXCEEDED',
+        'TARGET_TOO_LARGE',
         `That filter matches more than ${max.toLocaleString()} items. Narrow it before applying a change.`,
         { limit: max },
       );

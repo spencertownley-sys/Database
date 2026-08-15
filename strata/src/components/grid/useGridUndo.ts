@@ -51,7 +51,7 @@ export function useGridUndo(onChanged: () => void): UndoController {
       // than replaying the original — which keeps redo exact even if the
       // original operation is no longer expressible against current data.
       store.pushRedo({
-        changeSetId: result.changeSet.id,
+        changeSetId: result.undoChangeSetId,
         label: entry.label,
         itemCount: entry.itemCount,
         at: Date.now(),
@@ -78,7 +78,7 @@ export function useGridUndo(onChanged: () => void): UndoController {
     try {
       const result = await api.changeSets.undo(entry.changeSetId);
       store.pushUndo({
-        changeSetId: result.changeSet.id,
+        changeSetId: result.undoChangeSetId,
         label: entry.label,
         itemCount: entry.itemCount,
         at: Date.now(),

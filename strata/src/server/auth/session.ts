@@ -89,7 +89,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
 export async function requireSessionUser(): Promise<SessionUser> {
   const user = await getSessionUser();
-  if (!user) throw new AppError('UNAUTHENTICATED', 'Sign in to continue.');
+  if (!user) throw new AppError('UNAUTHORIZED', 'Sign in to continue.');
   return user;
 }
 
@@ -152,7 +152,7 @@ async function upsertLocalUser(input: {
       })
       .returning();
 
-    if (!created) throw new AppError('INTERNAL', 'Could not create the user record.');
+    if (!created) throw new AppError('INTERNAL_ERROR', 'Could not create the user record.');
     return created;
   });
 }

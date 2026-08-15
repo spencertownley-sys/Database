@@ -154,7 +154,7 @@ export async function createField(
   const key = input.key ?? slugifyKey(input.label, taken);
   assertValidKey(key);
   if (taken.has(key)) {
-    throw new AppError('FIELD_KEY_TAKEN', `A field with the key "${key}" already exists here.`);
+    throw new AppError('CONFLICT', `A field with the key "${key}" already exists here.`);
   }
 
   if (input.requiredForCompleteness) {
@@ -175,7 +175,7 @@ export async function createField(
       // completeness overnight. Surfacing that before it happens is the
       // difference between a metric people trust and one they learn to ignore.
       throw new AppError(
-        'REQUIRED_FIELD_NEEDS_ACKNOWLEDGEMENT',
+        'REQUIRES_ACKNOWLEDGMENT',
         `${count.toLocaleString()} existing ${count === 1 ? 'item' : 'items'} have no value for this field, so their completeness will drop. Give the field a default value, or confirm you want to leave them incomplete.`,
         { affectedItems: count },
       );
@@ -205,7 +205,7 @@ export async function createField(
     })
     .returning();
 
-  if (!created) throw new AppError('INTERNAL', 'Could not create the field.');
+  if (!created) throw new AppError('INTERNAL_ERROR', 'Could not create the field.');
   await invalidateSchemaCache(workspaceId, input.itemTypeId);
   return created;
 }
@@ -317,7 +317,7 @@ export async function updateField(
 
   if (patch.key !== undefined && patch.key !== field.key) {
     throw new AppError(
-      'FIELD_KEY_IMMUTABLE',
+      'VALIDATION_ERROR',
       'A field key cannot change once it exists — every stored value is keyed by it. Rename the label instead.',
     );
   }
@@ -356,7 +356,7 @@ export async function updateField(
     .where(eq(fieldsTable.id, fieldId))
     .returning();
 
-  if (!updated) throw new AppError('INTERNAL', 'Could not update the field.');
+  if (!updated) throw new AppError('INTERNAL_ERROR', 'Could not update the field.');
 
   if (typeChanged) {
     // The stored values are re-coerced by the caller's change set; the index
@@ -430,7 +430,7 @@ export async function restoreField(tx: Tx, workspaceId: string, fieldId: string)
 
   if (clash[0]) {
     throw new AppError(
-      'FIELD_KEY_TAKEN',
+      'CONFLICT',
       `A field using the key "${field.key}" was created after this one was deleted. Rename it before restoring.`,
     );
   }
@@ -441,7 +441,7 @@ export async function restoreField(tx: Tx, workspaceId: string, fieldId: string)
     .where(eq(fieldsTable.id, fieldId))
     .returning();
 
-  if (!restored) throw new AppError('INTERNAL', 'Could not restore the field.');
+  if (!restored) throw new AppError('INTERNAL_ERROR', 'Could not restore the field.');
   if (restored.isIndexed) await backfillField(tx, workspaceId, restored);
   await invalidateSchemaCache(workspaceId, field.itemTypeId);
   return restored;

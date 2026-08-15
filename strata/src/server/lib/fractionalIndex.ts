@@ -37,16 +37,16 @@ function digitAt(s: string, i: number): string | undefined {
 
 function indexOfDigit(c: string): number {
   const i = DIGITS.indexOf(c);
-  if (i === -1) throw new AppError('INTERNAL', `Invalid order key digit: ${JSON.stringify(c)}`);
+  if (i === -1) throw new AppError('INTERNAL_ERROR', `Invalid order key digit: ${JSON.stringify(c)}`);
   return i;
 }
 
 export function assertValidKey(key: string, label = 'order key'): void {
   if (!KEY_RE.test(key)) {
-    throw new AppError('INTERNAL', `Invalid ${label}: ${JSON.stringify(key)}`);
+    throw new AppError('INTERNAL_ERROR', `Invalid ${label}: ${JSON.stringify(key)}`);
   }
   if (key.endsWith(ZERO)) {
-    throw new AppError('INTERNAL', `Invalid ${label}: must not end in "${ZERO}".`);
+    throw new AppError('INTERNAL_ERROR', `Invalid ${label}: must not end in "${ZERO}".`);
   }
 }
 
@@ -58,10 +58,10 @@ export function assertValidKey(key: string, label = 'order key'): void {
  */
 function midpoint(a: string, b: string | null): string {
   if (b !== null && a >= b) {
-    throw new AppError('INTERNAL', `Order keys out of sequence: ${a} >= ${b}`);
+    throw new AppError('INTERNAL_ERROR', `Order keys out of sequence: ${a} >= ${b}`);
   }
   if (a.endsWith(ZERO) || (b !== null && b.endsWith(ZERO))) {
-    throw new AppError('INTERNAL', 'Order key must not end in the zero digit.');
+    throw new AppError('INTERNAL_ERROR', 'Order key must not end in the zero digit.');
   }
 
   if (b !== null) {

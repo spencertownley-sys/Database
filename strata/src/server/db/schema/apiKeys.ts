@@ -34,8 +34,8 @@ export const apiKeys = pgTable(
     name: text('name').notNull(),
     prefix: text('prefix').notNull(),
     hashedKey: text('hashed_key').notNull(),
-    /** Coarse scopes; the role still gates everything the scope allows. */
-    scopes: text('scopes').array().notNull().default(sql`'{read}'::text[]`),
+    /** Granular scopes (API Design §9); the role still gates everything the scope allows. */
+    scopes: text('scopes').array().notNull().default(sql`'{items:read}'::text[]`),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true, mode: 'date' }),
     expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
@@ -57,5 +57,17 @@ export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
 }));
 
 export type ApiKey = typeof apiKeys.$inferSelect;
-export const API_KEY_SCOPES = ['read', 'write', 'admin'] as const;
+export const API_KEY_SCOPES = [
+  'items:read',
+  'items:write',
+  'schema:read',
+  'schema:write',
+  'trees:read',
+  'trees:write',
+  'views:read',
+  'views:write',
+  'imports:write',
+  'exports:write',
+  'webhooks:manage',
+] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];

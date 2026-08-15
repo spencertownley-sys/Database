@@ -51,6 +51,7 @@ export default async function ItemTypeGridPage({
   return (
     <GridWorkspace
       workspaceSlug={slug}
+      workspaceId={context.workspace.id}
       itemType={itemType}
       members={members}
       editableFieldKeys={editableFieldKeysFor(context.actor, [])}

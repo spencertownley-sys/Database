@@ -30,8 +30,8 @@ export function RelationEditor(props: CellEditorProps) {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       api.items
-        .list({ itemType: targetTypeId, search: query, limit: 20 }, controller.signal)
-        .then((page) => setResults(page.items.map((i) => ({ id: i.id, title: i.title }))))
+        .list({ itemTypeId: targetTypeId, q: query, limit: 20 }, controller.signal)
+        .then((page) => setResults(page.data.map((i) => ({ id: i.id, title: i.title }))))
         .catch(() => {
           // An aborted or failed lookup leaves the previous results on screen
           // rather than blanking the list mid-keystroke.

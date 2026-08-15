@@ -195,7 +195,7 @@ export function Grid(props: GridProps) {
           });
 
           if (result.committed) {
-            lastChangeSetId = result.changeSet.id;
+            lastChangeSetId = result.id;
             totalItems += result.appliedCount ?? group.itemIds.length;
           } else {
             // Above the bulk threshold the server refuses to auto-commit; the

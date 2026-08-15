@@ -12,13 +12,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Field } from '@/server/db/schema/itemTypes';
-import { api, setWorkspaceSlug, type ItemTypeWithSchema } from '@/lib/api';
+import { api, setWorkspaceId, type ItemTypeWithSchema } from '@/lib/api';
 import type { SortSpec } from '@/types/filters';
 import { Grid } from './Grid';
 import type { WorkspaceMemberOption } from './editors/UserEditor';
 
 export interface GridWorkspaceProps {
   workspaceSlug: string;
+  /** Sent as `X-Workspace-Id` on every API call (API Design §1.1). */
+  workspaceId: string;
   itemType: ItemTypeWithSchema;
   members: WorkspaceMemberOption[];
   editableFieldKeys: string[] | null;
@@ -42,8 +44,8 @@ export function GridWorkspace(props: GridWorkspaceProps) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => {
-    setWorkspaceSlug(props.workspaceSlug);
-  }, [props.workspaceSlug]);
+    setWorkspaceId(props.workspaceId);
+  }, [props.workspaceId]);
 
   const viewHash = useMemo(
     () => JSON.stringify({ sort, incompleteOnly, search }),
@@ -60,12 +62,14 @@ export function GridWorkspace(props: GridWorkspaceProps) {
     queryFn: ({ signal }) =>
       api.items.list(
         {
-          itemType: props.itemType.id,
+          itemTypeId: props.itemType.id,
           sort,
           incompleteOnly: incompleteOnly || undefined,
-          search: search || undefined,
+          q: search || undefined,
+          // The grid nests variants under their model row, so loose variant
+          // rows are excluded here even though the API defaults them in.
+          includeVariants: false,
           limit: 200,
-          withTotal: true,
         },
         signal,
       ),
@@ -85,14 +89,14 @@ export function GridWorkspace(props: GridWorkspaceProps) {
   }, [props.workspaceSlug, queryClient]);
 
   const fields: Field[] = props.itemType.fields;
-  const items = data?.items ?? [];
+  const items = data?.data ?? [];
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b bg-[var(--color-surface)] px-3">
         <h1 className="text-sm font-semibold">{props.itemType.pluralName ?? props.itemType.name}</h1>
         <span className="text-xs text-[var(--color-ink-subtle)]">
-          {data?.total !== null && data?.total !== undefined ? `${data.total} total` : ''}
+          {data?.meta.total != null ? `${data.meta.total} total` : ''}
         </span>
 
         <input

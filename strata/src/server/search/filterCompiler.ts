@@ -74,13 +74,13 @@ function likeEscape(value: string): string {
 function asString(value: unknown, operator: string): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  throw new AppError('VALIDATION_FAILED', `"${operator}" needs a text value.`);
+  throw new AppError('VALIDATION_ERROR', `"${operator}" needs a text value.`);
 }
 
 function asNumber(value: unknown, operator: string): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs a numeric value.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs a numeric value.`);
   }
   return n;
 }
@@ -88,27 +88,27 @@ function asNumber(value: unknown, operator: string): number {
 function asDate(value: unknown, operator: string): Date {
   const dt = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(dt.getTime())) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs a date value.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs a date value.`);
   }
   return dt;
 }
 
 function asList(value: unknown, operator: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs a list of values.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs a list of values.`);
   }
   if (value.length === 0) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs at least one value.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs at least one value.`);
   }
   if (value.length > 1000) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" accepts at most 1000 values.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" accepts at most 1000 values.`);
   }
   return value;
 }
 
 function asPair(value: unknown, operator: string): [unknown, unknown] {
   if (!Array.isArray(value) || value.length !== 2) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs exactly two values.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs exactly two values.`);
   }
   return [value[0], value[1]];
 }
@@ -137,7 +137,7 @@ function assertOperatorForColumn(
 
   if (!allowed[column].includes(operator)) {
     throw new AppError(
-      'VALIDATION_FAILED',
+      'VALIDATION_ERROR',
       `"${operator.replace(/_/g, ' ')}" cannot be used on ${fieldLabel}.`,
       { operator, fieldLabel },
     );
@@ -230,7 +230,7 @@ function valuePredicate(
       return sql`not (${col} && ${asList(value, operator) as string[]}::text[])`;
 
     default:
-      throw new AppError('VALIDATION_FAILED', `Unknown filter operator "${String(operator)}".`);
+      throw new AppError('VALIDATION_ERROR', `Unknown filter operator "${String(operator)}".`);
   }
 }
 
@@ -239,7 +239,7 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
   if (!field) {
     // Never fall through to a raw column name. An unresolved key is the only
     // way caller input could reach SQL uncontrolled, so it is a hard error.
-    throw new AppError('VALIDATION_FAILED', `There is no field named "${clause.field}".`, {
+    throw new AppError('VALIDATION_ERROR', `There is no field named "${clause.field}".`, {
       field: clause.field,
     });
   }
@@ -261,7 +261,7 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
 
   const predicate = valuePredicate(clause.operator, column, clause.value);
   if (predicate === null) {
-    throw new AppError('VALIDATION_FAILED', `Unsupported filter on "${field.label}".`);
+    throw new AppError('VALIDATION_ERROR', `Unsupported filter on "${field.label}".`);
   }
 
   // `not_contains`, `not_in`, and `has_none` must also match items with no
@@ -294,7 +294,7 @@ function validateArity(clause: FilterClause): void {
   const { operator, value } = clause;
   if (NULLARY_OPERATORS.has(operator)) return;
   if (value === undefined || value === null) {
-    throw new AppError('VALIDATION_FAILED', `"${operator.replace(/_/g, ' ')}" needs a value.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator.replace(/_/g, ' ')}" needs a value.`);
   }
   if (BINARY_OPERATORS.has(operator)) asPair(value, operator);
   if (LIST_OPERATORS.has(operator)) asList(value, operator);
@@ -365,7 +365,7 @@ function compileSystemClause(clause: FilterClause, ctx: CompileContext): SQL {
     }
 
     default:
-      throw new AppError('VALIDATION_FAILED', `Unknown system field "${clause.field}".`);
+      throw new AppError('VALIDATION_ERROR', `Unknown system field "${clause.field}".`);
   }
 }
 
@@ -392,7 +392,7 @@ function compileTextColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
     case 'is_not_empty':
       return sql`(${col} is not null and ${col} <> '')`;
     default:
-      throw new AppError('VALIDATION_FAILED', `"${op}" cannot be used on a text column.`);
+      throw new AppError('VALIDATION_ERROR', `"${op}" cannot be used on a text column.`);
   }
 }
 
@@ -419,7 +419,7 @@ function compileNumberColumn(col: SQL, op: FilterOperator, value: unknown): SQL 
     case 'is_not_empty':
       return sql`${col} is not null`;
     default:
-      throw new AppError('VALIDATION_FAILED', `"${op}" cannot be used on a number column.`);
+      throw new AppError('VALIDATION_ERROR', `"${op}" cannot be used on a number column.`);
   }
 }
 
@@ -450,7 +450,7 @@ function compileDateColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
     case 'is_not_empty':
       return sql`${col} is not null`;
     default:
-      throw new AppError('VALIDATION_FAILED', `"${op}" cannot be used on a date column.`);
+      throw new AppError('VALIDATION_ERROR', `"${op}" cannot be used on a date column.`);
   }
 }
 
@@ -469,7 +469,7 @@ function compileUuidColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
     case 'is_not_empty':
       return sql`${col} is not null`;
     default:
-      throw new AppError('VALIDATION_FAILED', `"${op}" cannot be used on this column.`);
+      throw new AppError('VALIDATION_ERROR', `"${op}" cannot be used on this column.`);
   }
 }
 
@@ -486,11 +486,11 @@ export function compileFilter(
 
   function walk(group: FilterGroup, depth: number): SQL | null {
     if (depth > MAX_FILTER_DEPTH) {
-      throw new AppError('VALIDATION_FAILED', 'This filter is nested too deeply.');
+      throw new AppError('VALIDATION_ERROR', 'This filter is nested too deeply.');
     }
 
     const parts: SQL[] = [];
-    for (const node of group.clauses) {
+    for (const node of group.children) {
       if (isFilterGroup(node)) {
         const nested = walk(node, depth + 1);
         if (nested) parts.push(sql`(${nested})`);
@@ -499,7 +499,7 @@ export function compileFilter(
 
       clauseCount += 1;
       if (clauseCount > MAX_CLAUSES) {
-        throw new AppError('VALIDATION_FAILED', `A filter may have at most ${MAX_CLAUSES} rules.`);
+        throw new AppError('VALIDATION_ERROR', `A filter may have at most ${MAX_CLAUSES} rules.`);
       }
 
       parts.push(
@@ -510,7 +510,7 @@ export function compileFilter(
     }
 
     if (parts.length === 0) return null;
-    const joiner = group.operator === 'or' ? sql` or ` : sql` and `;
+    const joiner = group.op === 'or' ? sql` or ` : sql` and `;
     return sql.join(parts, joiner);
   }
 
@@ -560,12 +560,12 @@ export function buildSortTerms(
 
     const field = ctx.fieldsByKey.get(spec.field);
     if (!field) {
-      throw new AppError('VALIDATION_FAILED', `Cannot sort by "${spec.field}" — no such field.`);
+      throw new AppError('VALIDATION_ERROR', `Cannot sort by "${spec.field}" — no such field.`);
     }
     const column = indexColumnFor(field.type, field.config);
     if (column === 'text_array') {
       throw new AppError(
-        'VALIDATION_FAILED',
+        'VALIDATION_ERROR',
         `"${field.label}" holds several values per item, so it can be grouped but not sorted.`,
       );
     }
@@ -628,7 +628,7 @@ function systemSortColumn(field: string, ctx: CompileContext): SQL {
     case '$path':
       return sql`${itemRef}.path`;
     default:
-      throw new AppError('VALIDATION_FAILED', `Cannot sort by "${field}".`);
+      throw new AppError('VALIDATION_ERROR', `Cannot sort by "${field}".`);
   }
 }
 
@@ -640,7 +640,7 @@ export function referencedFieldKeys(
   const keys = new Set<string>();
 
   function walk(group: FilterGroup): void {
-    for (const node of group.clauses) {
+    for (const node of group.children) {
       if (isFilterGroup(node)) walk(node);
       else if (!isSystemFieldKey(node.field)) keys.add(node.field);
     }

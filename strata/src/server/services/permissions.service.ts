@@ -282,19 +282,21 @@ export function can(actor: Actor, action: Action, resource: Resource): Decision 
   if (actor.apiKey) {
     if (actor.role === 'guest') {
       return denial(
-        'GUEST_API_DENIED',
+        'GUEST_API_FORBIDDEN',
         'Guest accounts cannot use the API. Guest access is limited to the app, where their ' +
           'field restrictions are applied.',
       );
     }
-    const needed: ApiKeyScope = ADMIN_ACTIONS.has(action)
-      ? 'admin'
-      : WRITE_ACTIONS.has(action)
-        ? 'write'
-        : 'read';
-    if (!hasScope(actor.apiKey.scopes, needed)) {
-      return denial('FORBIDDEN', `This API key does not have "${needed}" scope.`, {
-        required: needed,
+    if (ADMIN_ACTIONS.has(action)) {
+      // No scope in API Design §9 grants workspace administration — member
+      // management, billing, and key minting are session-only on purpose: a
+      // leaked key must not be able to mint more keys.
+      return denial('FORBIDDEN', 'This action is not available to API keys. Sign in instead.');
+    }
+    const needed = scopeFor(action);
+    if (needed && !actor.apiKey.scopes.includes(needed)) {
+      return denial('FORBIDDEN', `This API key does not have the "${needed}" scope.`, {
+        required_scope: needed,
         granted: actor.apiKey.scopes,
       });
     }
@@ -330,10 +332,45 @@ export function can(actor: Actor, action: Action, resource: Resource): Decision 
   return true;
 }
 
-function hasScope(granted: readonly ApiKeyScope[], needed: ApiKeyScope): boolean {
-  if (granted.includes('admin')) return true;
-  if (needed === 'read') return granted.includes('read') || granted.includes('write');
-  return granted.includes(needed);
+/**
+ * The API Design §9 scope an action needs. `null` means the action carries no
+ * scope requirement beyond the member role (e.g. `workspace.read`, which every
+ * key needs to answer `GET /workspaces/:id`).
+ */
+function scopeFor(action: Action): ApiKeyScope | null {
+  const [subject] = action.split('.') as [string];
+  const writes = WRITE_ACTIONS.has(action);
+
+  switch (subject) {
+    case 'item':
+    case 'change_set':
+    case 'variant':
+      return writes ? 'items:write' : 'items:read';
+    case 'item_type':
+    case 'field':
+      return writes ? 'schema:write' : 'schema:read';
+    case 'tree':
+      return writes ? 'trees:write' : 'trees:read';
+    case 'tree_node':
+      // Filing items into nodes mutates item membership, not the tree itself.
+      return action === 'tree_node.assign_items'
+        ? 'items:write'
+        : writes
+          ? 'trees:write'
+          : 'trees:read';
+    case 'view':
+      return writes ? 'views:write' : 'views:read';
+    case 'import':
+      return 'imports:write';
+    case 'export':
+      return 'exports:write';
+    case 'webhook':
+      return 'webhooks:manage';
+    case 'activity':
+      return 'items:read';
+    default:
+      return null;
+  }
 }
 
 function roleDenialMessage(role: MemberRole, action: Action): string {
@@ -376,7 +413,7 @@ function roleDenialMessage(role: MemberRole, action: Action): string {
 function checkGuest(actor: Actor, action: Action, resource: Resource): Decision {
   const scopes = actor.guestScopes ?? [];
   if (scopes.length === 0) {
-    return denial('OUT_OF_SCOPE', 'Nothing has been shared with you in this workspace yet.');
+    return denial('FORBIDDEN', 'Nothing has been shared with you in this workspace yet.');
   }
 
   if (resource.kind !== 'item') {
@@ -387,7 +424,7 @@ function checkGuest(actor: Actor, action: Action, resource: Resource): Decision 
   const paths = resource.treeNodePaths;
   if (paths === undefined) {
     throw new AppError(
-      'INTERNAL',
+      'INTERNAL_ERROR',
       'Guest permission check requires the item’s tree node paths. Load them before calling can().',
     );
   }
@@ -399,7 +436,7 @@ function checkGuest(actor: Actor, action: Action, resource: Resource): Decision 
   );
 
   if (matching.length === 0) {
-    return denial('OUT_OF_SCOPE', 'That item is outside the area shared with you.');
+    return denial('FORBIDDEN', 'That item is outside the area shared with you.');
   }
 
   if (action === 'item.read') return true;
@@ -407,7 +444,7 @@ function checkGuest(actor: Actor, action: Action, resource: Resource): Decision 
   if (action === 'item.update') {
     const editable = matching.filter((s) => s.canEdit);
     if (editable.length === 0) {
-      return denial('OUT_OF_SCOPE', 'You have view-only access to this item.');
+      return denial('FORBIDDEN', 'You have view-only access to this item.');
     }
 
     const keys = resource.fieldKeys ?? [];
@@ -418,7 +455,7 @@ function checkGuest(actor: Actor, action: Action, resource: Resource): Decision 
     const allowed = new Set(editable.flatMap((s) => s.editableFieldKeys ?? []));
     const blocked = keys.filter((k) => !allowed.has(k));
     if (blocked.length > 0) {
-      return denial('OUT_OF_SCOPE', `You can’t edit ${blocked.join(', ')} on shared items.`, {
+      return denial('FORBIDDEN', `You can’t edit ${blocked.join(', ')} on shared items.`, {
         blockedFields: blocked,
         allowedFields: [...allowed],
       });

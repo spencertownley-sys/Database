@@ -6,6 +6,7 @@ import {
   previewChangeSet,
 } from '@/server/services/changeSets.service';
 import { assertCan } from '@/server/services/permissions.service';
+import { shapeChangeSet } from '@/server/lib/changeSetWire';
 import { changeSetInputSchema } from '@/server/validation/schemas';
 import type { ChangeTarget } from '@/server/db/schema/changeSets';
 
@@ -47,12 +48,12 @@ export async function POST(request: Request): Promise<Response> {
         });
 
         if (!input.autoCommit) {
-          return { changeSet, requiresAsyncCommit };
+          return { ...shapeChangeSet(changeSet), requiresAsyncCommit };
         }
 
         if (requiresAsyncCommit) {
           return {
-            changeSet,
+            ...shapeChangeSet(changeSet),
             requiresAsyncCommit,
             committed: false,
             message: `This affects ${changeSet.itemCount.toLocaleString()} items — more than the ${BULK_SYNC_THRESHOLD} that apply immediately. Review the preview and commit it.`,
@@ -61,7 +62,7 @@ export async function POST(request: Request): Promise<Response> {
 
         const result = await commitChangeSet(tx, changeContext, changeSet.id);
         return {
-          changeSet: result.changeSet,
+          ...shapeChangeSet(result.changeSet),
           requiresAsyncCommit: false,
           committed: true,
           appliedCount: result.appliedCount,
@@ -70,6 +71,6 @@ export async function POST(request: Request): Promise<Response> {
         };
       });
     },
-    { limit: 'write' },
+    { limit: 'write', status: 201 },
   );
 }

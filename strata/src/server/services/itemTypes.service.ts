@@ -16,7 +16,7 @@ import { VARIANT_AXIS_TYPES } from '@/types/fields';
 
 export interface ItemTypeWithSchema extends ItemType {
   fields: Field[];
-  groups: FieldGroup[];
+  fieldGroups: FieldGroup[];
 }
 
 const KEY_RE = /^[a-z][a-z0-9_]{0,62}$/;
@@ -50,7 +50,7 @@ export function slugifyKey(name: string, taken: ReadonlySet<string> = new Set())
 export function assertValidKey(key: string): void {
   if (!KEY_RE.test(key)) {
     throw new AppError(
-      'VALIDATION_FAILED',
+      'VALIDATION_ERROR',
       `"${key}" is not a valid key. Use lowercase letters, digits and underscores, starting with a letter.`,
     );
   }
@@ -89,7 +89,7 @@ export async function getItemTypeWithSchema(
 
   if (!type) throw new AppError('NOT_FOUND', 'That item type no longer exists.');
 
-  const [typeFields, groups] = await Promise.all([
+  const [typeFields, typeGroups] = await Promise.all([
     tx
       .select()
       .from(fieldsTable)
@@ -102,7 +102,7 @@ export async function getItemTypeWithSchema(
       .orderBy(asc(fieldGroups.orderKey)),
   ]);
 
-  return { ...type, fields: typeFields, groups };
+  return { ...type, fields: typeFields, fieldGroups: typeGroups };
 }
 
 export interface CreateItemTypeInput {
@@ -144,7 +144,7 @@ export async function createItemType(
     })
     .returning();
 
-  if (!created) throw new AppError('INTERNAL', 'Item type was not created.');
+  if (!created) throw new AppError('INTERNAL_ERROR', 'Item type was not created.');
   return created;
 }
 
@@ -189,7 +189,7 @@ export async function createItemTypeFromPreset(
     type.variantAxes = preset.variantAxes;
   }
 
-  return { ...type, fields, groups };
+  return { ...type, fields, fieldGroups: groups };
 }
 
 async function applyPresetSchema(
@@ -257,17 +257,17 @@ export function assertVariantAxes(axisKeys: readonly string[], typeFields: reado
   for (const key of axisKeys) {
     const field = byKey.get(key);
     if (!field) {
-      throw new AppError('VARIANT_AXIS_INVALID', `There is no field named "${key}" to use as an axis.`);
+      throw new AppError('INVALID_VARIANT_AXIS', `There is no field named "${key}" to use as an axis.`);
     }
     if (!VARIANT_AXIS_TYPES.has(field.type)) {
       throw new AppError(
-        'VARIANT_AXIS_INVALID',
+        'INVALID_VARIANT_AXIS',
         `"${field.label}" is a ${field.type} field. Variant axes must be single-select fields.`,
       );
     }
     if (field.inheritance !== 'variant') {
       throw new AppError(
-        'VARIANT_AXIS_INVALID',
+        'INVALID_VARIANT_AXIS',
         `"${field.label}" must be set to vary per variant before it can be an axis.`,
       );
     }
@@ -318,7 +318,7 @@ export async function deleteItemType(
 
   if (count > 0) {
     throw new AppError(
-      'ITEM_TYPE_IN_USE',
+      'TYPE_IN_USE',
       `${count} item${count === 1 ? '' : 's'} still use this type. Delete or re-type them first.`,
       { itemCount: count },
     );

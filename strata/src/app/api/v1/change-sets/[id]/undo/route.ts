@@ -28,9 +28,13 @@ export async function POST(
           },
           id,
         );
+        // §5: the undo response names both sets and reports what was restored.
         return {
-          changeSet: result.changeSet,
-          restoredCount: result.appliedCount,
+          undoChangeSetId: result.changeSet.id,
+          originalChangeSetId: id,
+          status: result.changeSet.status,
+          itemCount: result.changeSet.itemCount,
+          restored: result.appliedCount,
           variantsPropagated: result.variantsPropagated,
         };
       }),

@@ -2,6 +2,7 @@ import { withWorkspace } from '@/server/db';
 import { handle } from '@/server/lib/route';
 import { commitChangeSet, getChangeSet } from '@/server/services/changeSets.service';
 import { assertCan } from '@/server/services/permissions.service';
+import { shapeChangeSet } from '@/server/lib/changeSetWire';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,7 @@ export async function POST(
         );
 
         return {
-          changeSet: result.changeSet,
+          ...shapeChangeSet(result.changeSet),
           appliedCount: result.appliedCount,
           skippedCount: result.skippedCount,
           variantsPropagated: result.variantsPropagated,

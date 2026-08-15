@@ -63,7 +63,7 @@ describe('membership lookup', () => {
 });
 
 describe('app_resolve_api_key', () => {
-  const secret = 'sk_strata_test_fixture_key';
+  const secret = 'sk_live_test_fixture_key';
   // Matches hashApiKey() with the test pepper; computed inline so the test
   // does not depend on the app's env being loaded the same way.
   let hashed: string;
@@ -81,7 +81,7 @@ describe('app_resolve_api_key', () => {
 
     const [row] = await ownerClient<Array<{ id: string }>>`
       insert into api_keys (workspace_id, member_id, name, prefix, hashed_key, scopes)
-      values (${northwind}, ${member?.id ?? null}, 'test fixture', 'sk_strata_test', ${hashed}, ARRAY['read','write'])
+      values (${northwind}, ${member?.id ?? null}, 'test fixture', 'sk_live_test', ${hashed}, ARRAY['items:read','items:write'])
       on conflict (hashed_key) do update set name = excluded.name
       returning id
     `;

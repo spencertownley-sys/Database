@@ -3,6 +3,7 @@ import { withWorkspace } from '@/server/db';
 import { changeEntries } from '@/server/db/schema/changeSets';
 import { handle } from '@/server/lib/route';
 import { discardPreview, getChangeSet } from '@/server/services/changeSets.service';
+import { shapeChangeSet } from '@/server/lib/changeSetWire';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,7 @@ export async function GET(
       // change set does not ship 40k rows to render a headline.
       const url = new URL(request.url);
       if (url.searchParams.get('entries') !== 'all') {
-        return { changeSet, entries: changeSet.sampleEntries, truncated: changeSet.itemCount > 20 };
+        return { ...shapeChangeSet(changeSet), truncated: changeSet.itemCount > 20 };
       }
 
       const entries = await tx
@@ -36,7 +37,7 @@ export async function GET(
         .orderBy(changeEntries.seq)
         .limit(1000);
 
-      return { changeSet, entries, truncated: changeSet.itemCount > 1000 };
+      return { ...shapeChangeSet(changeSet), entries, truncated: changeSet.itemCount > 1000 };
     }),
   );
 }

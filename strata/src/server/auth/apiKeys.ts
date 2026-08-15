@@ -18,7 +18,7 @@ import { apiKeys, type ApiKeyScope } from '@/server/db/schema/apiKeys';
 import { type MemberRole } from '@/server/db/schema/workspaces';
 import { AppError } from '@/server/lib/errors';
 
-const KEY_PREFIX = 'sk_strata_';
+const KEY_PREFIX = 'sk_live_';
 const PREFIX_DISPLAY_LENGTH = KEY_PREFIX.length + 6;
 
 function pepper(): string {
@@ -26,7 +26,7 @@ function pepper(): string {
   if (!value) {
     // Without a pepper the stored hashes are unsalted SHA-256 of a known
     // format — refuse rather than silently weaken every key in the system.
-    throw new AppError('INTERNAL', 'API_KEY_PEPPER is not configured.');
+    throw new AppError('INTERNAL_ERROR', 'API_KEY_PEPPER is not configured.');
   }
   return value;
 }
@@ -91,7 +91,7 @@ export async function resolveApiKey(presented: string): Promise<ApiKeyIdentity> 
   });
 
   const found = rows[0];
-  if (!found) throw new AppError('UNAUTHENTICATED', 'That API key is not valid.');
+  if (!found) throw new AppError('UNAUTHORIZED', 'That API key is not valid.');
 
   const row = {
     id: found.api_key_id,
@@ -113,16 +113,16 @@ export async function resolveApiKey(presented: string): Promise<ApiKeyIdentity> 
     presentedBuffer.length !== storedBuffer.length ||
     !timingSafeEqual(presentedBuffer, storedBuffer)
   ) {
-    throw new AppError('UNAUTHENTICATED', 'That API key is not valid.');
+    throw new AppError('UNAUTHORIZED', 'That API key is not valid.');
   }
 
   if (row.memberStatus !== 'active') {
-    throw new AppError('UNAUTHENTICATED', 'The account behind this key is no longer active.');
+    throw new AppError('UNAUTHORIZED', 'The account behind this key is no longer active.');
   }
 
   if (row.role === 'guest') {
     throw new AppError(
-      'GUEST_API_DENIED',
+      'GUEST_API_FORBIDDEN',
       'Guest accounts cannot use the API. Guest access is limited to the app, where their field restrictions are applied.',
     );
   }

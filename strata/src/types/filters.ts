@@ -132,16 +132,17 @@ export interface FilterClause {
   includeDescendants?: boolean;
 }
 
+/** Group keys are `op`/`children` — the API Design §4.1 grammar, verbatim. */
 export interface FilterGroup {
-  operator: LogicalOperator;
-  clauses: Array<FilterClause | FilterGroup>;
+  op: LogicalOperator;
+  children: Array<FilterClause | FilterGroup>;
 }
 
 export function isFilterGroup(node: FilterClause | FilterGroup): node is FilterGroup {
-  return 'clauses' in node;
+  return 'children' in node;
 }
 
-export const EMPTY_FILTER: FilterGroup = { operator: 'and', clauses: [] };
+export const EMPTY_FILTER: FilterGroup = { op: 'and', children: [] };
 
 export type SortDirection = 'asc' | 'desc';
 

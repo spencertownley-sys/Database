@@ -174,7 +174,7 @@ export function expandAxes(axes: readonly AxisSpec[]): Array<Record<string, stri
   for (const axis of axes) {
     if (axis.optionIds.length === 0) {
       throw new AppError(
-        'VARIANT_AXIS_INVALID',
+        'INVALID_VARIANT_AXIS',
         `Pick at least one value for "${axis.fieldKey}" before generating variants.`,
       );
     }

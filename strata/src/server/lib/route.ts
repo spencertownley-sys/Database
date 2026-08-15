@@ -14,11 +14,14 @@ import { z } from 'zod';
 import { AppError, toErrorResponse } from './errors';
 import { resolveRequestContext, type RequestContext } from '@/server/auth/middleware';
 import { rateLimitHeaders, type LimitKind } from './ratelimit';
+import { fromWire, toWire } from '@/lib/wire';
 
 export interface RouteOptions {
   limit?: LimitKind;
   /** Set for endpoints that must work without a workspace (auth, health). */
   anonymous?: boolean;
+  /** HTTP status for the success response. Defaults to 200. */
+  status?: number;
 }
 
 export type Handler<T> = (args: {
@@ -28,19 +31,15 @@ export type Handler<T> = (args: {
 }) => Promise<T>;
 
 /**
- * The workspace a request addresses.
- *
- * `?workspace=` or `X-Strata-Workspace`, both carrying the slug. An API key is
- * already bound to one workspace and does not need it; a session-authenticated
- * call does, because a person may belong to several.
+ * The workspace a session request addresses: the `X-Workspace-Id` header,
+ * carrying the workspace **uuid** (API Design §1.1). An API key is already
+ * bound to one workspace and does not need it; a session-authenticated call
+ * does, because a person may belong to several. There is deliberately no
+ * "default workspace" fallback and no query-param alternative — an implicit
+ * tenant is how cross-tenant bugs happen.
  */
-function workspaceSlugOf(request: Request): string | undefined {
-  const url = new URL(request.url);
-  return (
-    url.searchParams.get('workspace') ??
-    request.headers.get('x-strata-workspace') ??
-    undefined
-  );
+function workspaceIdOf(request: Request): string | undefined {
+  return request.headers.get('x-workspace-id') ?? undefined;
 }
 
 export function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
@@ -60,13 +59,15 @@ export async function handle<T>(
   try {
     const context = await resolveRequestContext(
       request,
-      workspaceSlugOf(request),
+      workspaceIdOf(request),
       options.limit ?? 'read',
     );
 
     const result = await handler({ request, context, requestId });
 
-    return jsonResponse(result, {
+    // The wire is snake_case (API Design §1.2); the boundary is exactly here.
+    return jsonResponse(toWire(result), {
+      status: options.status ?? 200,
       headers: {
         'x-request-id': requestId,
         ...(context.rateLimit ? rateLimitHeaders(context.rateLimit) : {}),
@@ -99,12 +100,14 @@ export async function parseBody<S extends z.ZodTypeAny>(
   try {
     raw = await request.json();
   } catch {
-    throw new AppError('VALIDATION_FAILED', 'The request body is not valid JSON.');
+    throw new AppError('VALIDATION_ERROR', 'The request body is not valid JSON.');
   }
 
-  const result = schema.safeParse(raw);
+  // Bodies arrive snake_case; the schemas (and everything behind them) are
+  // camelCase. Converting before validation keeps both sides single-convention.
+  const result = schema.safeParse(fromWire(raw));
   if (!result.success) {
-    throw new AppError('VALIDATION_FAILED', 'Some fields are not valid.', {
+    throw new AppError('VALIDATION_ERROR', 'Some fields are not valid.', {
       issues: result.error.issues.map((issue) => ({
         path: issue.path.join('.'),
         message: issue.message,
@@ -125,9 +128,10 @@ export function parseQuery<S extends z.ZodTypeAny>(request: Request, schema: S):
     else raw[key] = [existing, value];
   }
 
-  const result = schema.safeParse(raw);
+  // Query params are snake_case on the wire, like bodies.
+  const result = schema.safeParse(fromWire(raw));
   if (!result.success) {
-    throw new AppError('VALIDATION_FAILED', 'Some query parameters are not valid.', {
+    throw new AppError('VALIDATION_ERROR', 'Some query parameters are not valid.', {
       issues: result.error.issues.map((issue) => ({
         path: issue.path.join('.'),
         message: issue.message,
