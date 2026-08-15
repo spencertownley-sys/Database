@@ -10,6 +10,7 @@
  */
 
 import type { Item } from '@/server/db/schema/items';
+import type { Tree, TreeNode } from '@/server/db/schema/trees';
 import type { ChangeOperation, ChangeSetStatus, ChangeSummary, SampleEntry } from '@/server/db/schema/changeSets';
 import type { Field, FieldGroup, ItemType } from '@/server/db/schema/itemTypes';
 import type { ErrorCode } from '@/server/lib/errors';
@@ -230,6 +231,58 @@ export const api = {
         parentId?: string | null;
       },
     ) => request<ItemDetail>(`/api/v1/items/${id}`, { method: 'PATCH', body }),
+  },
+
+  trees: {
+    list: (signal?: AbortSignal) =>
+      request<Collection<Tree & { nodeCount: number }>>('/api/v1/trees', { signal }),
+
+    create: (body: { label: string; description?: string }) =>
+      request<Tree>('/api/v1/trees', { method: 'POST', body }),
+
+    rename: (id: string, label: string) =>
+      request<Tree>(`/api/v1/trees/${id}`, { method: 'PATCH', body: { label } }),
+
+    nodes: (treeId: string, signal?: AbortSignal) =>
+      request<Collection<TreeNode & { childCount: number; descendantItemCount: number }>>(
+        `/api/v1/trees/${treeId}/nodes`,
+        { signal },
+      ),
+
+    createNode: (treeId: string, body: { label: string; parentId?: string | null }) =>
+      request<TreeNode>(`/api/v1/trees/${treeId}/nodes`, { method: 'POST', body }),
+
+    patchNode: (
+      nodeId: string,
+      body: { label?: string; parentId?: string | null; beforeNodeId?: string | null },
+    ) => request<TreeNode>(`/api/v1/tree-nodes/${nodeId}`, { method: 'PATCH', body }),
+
+    deleteNode: (
+      nodeId: string,
+      onMembers?: 'unassign' | 'move_to_parent' | 'move_to',
+      targetNodeId?: string,
+    ) => {
+      const search = new URLSearchParams();
+      if (onMembers) search.set('on_members', onMembers);
+      if (targetNodeId) search.set('target_node_id', targetNodeId);
+      const qs = search.toString();
+      return request<{ deleted: true; movedMembers: number; unassignedMembers: number }>(
+        `/api/v1/tree-nodes/${nodeId}${qs ? `?${qs}` : ''}`,
+        { method: 'DELETE' },
+      );
+    },
+
+    assignItems: (nodeId: string, itemIds: string[]) =>
+      request<ChangeSetWire>(`/api/v1/tree-nodes/${nodeId}/items`, {
+        method: 'POST',
+        body: { itemIds, autoCommit: true },
+      }),
+
+    unassignItems: (nodeId: string, itemIds: string[]) =>
+      request<ChangeSetWire>(`/api/v1/tree-nodes/${nodeId}/items`, {
+        method: 'DELETE',
+        body: { itemIds, autoCommit: true },
+      }),
   },
 
   activity: {

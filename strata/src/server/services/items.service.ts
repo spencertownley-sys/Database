@@ -23,7 +23,7 @@ import { items, itemFieldIndex, type Item, type ItemValues, type InvalidValues }
 import { itemTreeNodes, treeNodes } from '@/server/db/schema/trees';
 import { itemTypes, type Field } from '@/server/db/schema/itemTypes';
 import { AppError } from '@/server/lib/errors';
-import { assertDepthAfterMove, assertNoCycle, childPath, pathDepth } from '@/server/lib/ltree';
+import { assertDepthAfterMove, assertNoCycle, pathDepth } from '@/server/lib/ltree';
 import { computeCompleteness } from './completeness.service';
 import { computeEffectiveValues, ownEffectiveValues } from './variants.service';
 import {
@@ -299,12 +299,12 @@ export async function reparentSubtree(
     newParentPath ? pathDepth(newParentPath) : 0,
   );
 
-  const newPath = childPath(newParentPath, itemId);
-
+  // Offset is `nlevel(old) - 1` so the moving row keeps its own label;
+  // `subpath(p, nlevel(p))` would be an empty slice, which ltree rejects.
   await tx.execute(sql`
     update items
-    set path = ${newPath}::ltree || subpath(path, nlevel(${moving.path}::ltree)),
-        depth = nlevel(${newPath}::ltree || subpath(path, nlevel(${moving.path}::ltree))) - 1,
+    set path = ${newParentPath ?? ''}::ltree || subpath(path, nlevel(${moving.path}::ltree) - 1),
+        depth = nlevel(${newParentPath ?? ''}::ltree || subpath(path, nlevel(${moving.path}::ltree) - 1)) - 1,
         updated_at = now()
     where workspace_id = ${workspaceId}
       and path <@ ${moving.path}::ltree

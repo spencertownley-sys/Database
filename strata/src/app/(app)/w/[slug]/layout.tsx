@@ -67,6 +67,19 @@ export default async function WorkspaceLayout({
         <div className="flex min-h-0 flex-1">
           <nav className="w-56 shrink-0 overflow-y-auto border-r bg-[var(--color-surface)] p-2">
             <p className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-ink-subtle)]">
+              Organize
+            </p>
+            <ul className="mb-2 space-y-0.5">
+              <li>
+                <Link
+                  href={`/w/${slug}/trees`}
+                  className="flex items-center rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
+                >
+                  Category trees
+                </Link>
+              </li>
+            </ul>
+            <p className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-ink-subtle)]">
               Item types
             </p>
             <ul className="space-y-0.5">
