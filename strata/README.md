@@ -70,11 +70,44 @@ out of band with a managed secret.
 ### 4. Run
 
 ```bash
-npm run dev        # http://localhost:3000
+STRATA_DEV_USER=alice@northwind.test npm run dev
+```
+
+Then open **http://localhost:3000/w/northwind**.
+
+`STRATA_DEV_USER` is the local auth fallback for running without a Supabase
+project. It only works when `NODE_ENV !== 'production'` *and* Supabase is
+unconfigured, and it is inert in a production build. Seeded addresses:
+`alice@northwind.test` (owner), `bob@` (editor), `carol@` (viewer),
+`dana@client.test` (guest).
+
+```bash
 npm run typecheck
 npm run lint
 npm test
 ```
+
+### Troubleshooting
+
+**`AggregateError` / "An error occurred in the Server Components render but no
+message was provided".** This is the database being unreachable. Next.js masks
+Server Component error messages in the browser by design, so the real error
+(usually `ECONNREFUSED`) appears only in the terminal running `npm run dev`.
+
+The workspace shell now diagnoses this before touching any data and renders the
+specific fix instead of crashing, so you should see a setup page rather than
+that error. If you do hit it, the two usual causes are:
+
+- **Postgres is not running.** `docker compose up -d` exits successfully even
+  when Docker itself is not started — check with `docker compose ps`.
+- **The migration was run without `CREATE_LOCAL_APP_ROLE=1`.** The app connects
+  as `strata_app`, which has no password until that flag creates one. See
+  [Tenant isolation](#tenant-isolation) for why it does not connect as the owner.
+
+**Connections fail on `localhost` but work on `127.0.0.1`.** Node resolves
+`localhost` to both `::1` and `127.0.0.1`; if Postgres binds only IPv4, the IPv6
+attempt fails and the driver reports an `AggregateError` covering both. The
+`.env.example` uses `127.0.0.1` for this reason.
 
 ---
 

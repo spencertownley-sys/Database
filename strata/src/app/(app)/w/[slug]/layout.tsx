@@ -6,6 +6,8 @@ import { getSessionUser } from '@/server/auth/session';
 import { resolveSessionContext } from '@/server/auth/middleware';
 import { Providers } from '@/app/providers';
 import { AppError } from '@/server/lib/errors';
+import { checkDatabaseReadiness } from '@/server/db/readiness';
+import { SetupHelp } from '@/components/SetupHelp';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +19,13 @@ export default async function WorkspaceLayout({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
+
+  // Diagnosed before anything else touches the database. A connection failure
+  // inside a Server Component reaches the browser as an unlabelled
+  // AggregateError, which tells the person setting this up nothing at all.
+  const readiness = await checkDatabaseReadiness();
+  if (readiness.state !== 'ready') return <SetupHelp readiness={readiness} />;
+
   const user = await getSessionUser();
 
   if (!user) {
