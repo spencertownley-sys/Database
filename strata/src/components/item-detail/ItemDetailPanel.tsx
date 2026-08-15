@@ -23,6 +23,7 @@ import { api, ApiError, type ItemDetail } from '@/lib/api';
 import { formatValue } from '@/server/validation/fieldTypes';
 import type { SelectOption } from '@/types/fields';
 import { CompletenessBar } from './CompletenessBar';
+import { ConceptHint } from '@/components/concept-hints/ConceptHint';
 import { GenerateVariantsDialog } from './GenerateVariantsDialog';
 import type { WorkspaceMemberOption } from '@/components/grid/editors/UserEditor';
 
@@ -198,6 +199,7 @@ export function ItemDetailPanel(props: ItemDetailPanelProps) {
 
           {!item.variantInfo && (item.itemType?.variantAxes?.length ?? 0) > 0 && (
             <section className="border-b px-4 py-3" aria-label="Variants">
+              <ConceptHint hint="variants" />
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
                   Variants {item.variants?.length ? `(${item.variants.length})` : ''}

@@ -6,6 +6,7 @@ import { getSessionUser } from '@/server/auth/session';
 import { resolveSessionContext } from '@/server/auth/middleware';
 import { Providers } from '@/app/providers';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { CommandPalette } from '@/components/CommandPalette';
 import { AppError } from '@/server/lib/errors';
 import { checkDatabaseReadiness } from '@/server/db/readiness';
 import { SetupHelp } from '@/components/SetupHelp';
@@ -119,6 +120,16 @@ export default async function WorkspaceLayout({
 
           <main className="min-w-0 flex-1">{children}</main>
         </div>
+
+        <CommandPalette
+          workspaceId={context.workspace.id}
+          workspaceSlug={slug}
+          itemTypes={itemTypes.map((t) => ({
+            id: t.id,
+            label: t.label,
+            pluralLabel: t.pluralLabel,
+          }))}
+        />
       </div>
     </Providers>
   );

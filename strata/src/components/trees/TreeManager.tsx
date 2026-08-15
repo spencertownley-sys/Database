@@ -17,6 +17,7 @@ import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import type { Item } from '@/server/db/schema/items';
 import type { TreeNode } from '@/server/db/schema/trees';
 import { api, ApiError, setWorkspaceId } from '@/lib/api';
+import { ConceptHint } from '@/components/concept-hints/ConceptHint';
 import { CompletenessBar } from '@/components/item-detail/CompletenessBar';
 
 type NodeRow = TreeNode & { childCount: number; descendantItemCount: number };
@@ -80,7 +81,11 @@ export function TreeManager(props: { workspaceId: string; workspaceSlug: string 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-3 pt-3">
+        <ConceptHint hint="trees" />
+      </div>
+      <div className="flex min-h-0 flex-1">
       {/* ---- left: trees and nodes ---- */}
       <aside className="flex w-80 shrink-0 flex-col border-r bg-[var(--color-surface)]">
         <div className="flex items-center justify-between border-b px-3 py-2">
@@ -340,6 +345,7 @@ export function TreeManager(props: { workspaceId: string; workspaceSlug: string 
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

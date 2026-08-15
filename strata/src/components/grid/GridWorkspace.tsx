@@ -16,6 +16,7 @@ import { api, setWorkspaceId, type ItemTypeWithSchema } from '@/lib/api';
 import type { SortSpec } from '@/types/filters';
 import { Grid } from './Grid';
 import { SavedViews } from './SavedViews';
+import { ConceptHint } from '@/components/concept-hints/ConceptHint';
 import { ListView } from '@/components/list/ListView';
 import { BoardView } from '@/components/board/BoardView';
 import { ItemDetailPanel } from '@/components/item-detail/ItemDetailPanel';
@@ -195,6 +196,12 @@ export function GridWorkspace(props: GridWorkspaceProps) {
         </button>
       </div>
 
+      {incompleteOnly && (
+        <div className="shrink-0 px-3 pt-2">
+          <ConceptHint hint="completeness" />
+        </div>
+      )}
+
       <div className="min-h-0 flex-1">
         {isLoading ? (
           <p className="p-6 text-sm text-[var(--color-ink-subtle)]">Loading items…</p>
@@ -241,7 +248,9 @@ export function GridWorkspace(props: GridWorkspaceProps) {
             onFieldOrderChange={setFieldOrder}
             onOpenDetail={setDetailItemId}
             onFocusFilter={() => searchRef.current?.focus()}
-            onCommandPalette={() => searchRef.current?.focus()}
+            onCommandPalette={() =>
+              window.dispatchEvent(new Event('strata:open-command-palette'))
+            }
             onDataChanged={refetch}
             onToast={pushToast}
           />
