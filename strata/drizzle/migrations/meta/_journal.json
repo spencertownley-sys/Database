@@ -15,6 +15,20 @@
       "when": 1786780649652,
       "tag": "0001_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786782350619,
+      "tag": "0002_change_entry_item_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786782414273,
+      "tag": "0003_hard_delete_flag",
+      "breakpoints": true
     }
   ]
 }

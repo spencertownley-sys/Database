@@ -136,14 +136,31 @@ export const changeEntries = pgTable(
     changeSetId: uuid('change_set_id')
       .notNull()
       .references(() => changeSets.id, { onDelete: 'cascade' }),
-    /** Null for `create` previews — the item does not exist yet. */
-    itemId: uuid('item_id').references(() => items.id, { onDelete: 'cascade' }),
+    /**
+     * Deliberately *not* a foreign key.
+     *
+     * A change entry is an audit record, and its lifetime is not the item's.
+     * A `create` preview writes the entry before the item exists, and an
+     * entry must survive the item being hard-deleted — otherwise the activity
+     * feed loses the record of the deletion itself. Tenant scoping comes from
+     * `workspace_id`, which is a real FK and carries the RLS policy.
+     */
+    itemId: uuid('item_id'),
     seq: integer('seq').notNull().default(0),
     before: jsonb('before').$type<Record<string, unknown> | null>(),
     after: jsonb('after').$type<Record<string, unknown> | null>(),
     /** Skipped by permission or validation; the rest of the set still applies. */
     skipped: boolean('skipped').notNull().default(false),
     skipReason: text('skip_reason'),
+    /**
+     * Remove the row outright instead of soft-deleting it.
+     *
+     * Set only when undoing a `create`: the item never existed before that
+     * change set, so leaving a tombstone would mean undoing a 200-row paste
+     * left 200 invisible rows behind forever. A user-initiated `delete` is
+     * always soft, so that its own undo is a restore.
+     */
+    hardDelete: boolean('hard_delete').notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
@@ -153,15 +170,28 @@ export const changeEntries = pgTable(
   ],
 );
 
+/** A single item to be created by a `create` change set. */
+export interface ItemDraft {
+  title: string;
+  values?: Record<string, unknown>;
+  parentId?: string | null;
+  treeNodeIds?: string[];
+  itemTypeId?: string;
+  /** Set when generating variants of a model. */
+  variantOfId?: string | null;
+  isVariantModel?: boolean;
+  variantAxisValues?: Record<string, string> | null;
+}
+
 export interface ChangeTarget {
   kind: 'ids' | 'filter' | 'subtree' | 'new';
   itemIds?: string[];
-  /** Serialized FilterGroup; re-resolved at commit so the set cannot drift. */
+  /** Serialized FilterGroup, resolved to concrete ids at preview time. */
   filter?: unknown;
   rootItemId?: string;
   includeDescendants?: boolean;
-  /** For `create`: how many items and their seed values. */
-  drafts?: Array<Record<string, unknown>>;
+  /** For `create`: the items to create and their seed values. */
+  drafts?: ItemDraft[];
 }
 
 export interface ChangeSummary {
