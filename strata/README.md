@@ -192,14 +192,23 @@ Integration tests need the local database migrated and seeded.
 
 ---
 
-## Documentation status
+## Documentation
 
-This build follows `strata-CLAUDE.md`. Its five companion documents (`PRD`,
-`TECH_SPEC`, `API_DESIGN`, `UI_UX_NOTES`, `LAUNCH_CHECKLIST`) were referenced but
-their contents were not available to the build, so the specifications they own —
-the full column list, the performance budgets, the error envelope, the grid key
-map, the permission matrix — were derived from the detailed descriptions in
-`CLAUDE.md` itself. Where a derived decision could reasonably have gone another
-way, the reasoning is recorded in a comment at the point of the decision (see
-`permissions.service.ts`, `variants.service.ts`, `fieldTypes.ts`). Reconcile
-against the source documents before launch.
+| Document | Owns |
+| --- | --- |
+| [`CLAUDE.md`](CLAUDE.md) | The build instructions. Read first. |
+| [`docs/PRD.md`](docs/PRD.md) | Why the product exists, personas, acceptance criteria, success metrics |
+| [`docs/TECH_SPEC.md`](docs/TECH_SPEC.md) | Data model, architecture decisions, performance budgets, testing strategy |
+| [`docs/API_DESIGN.md`](docs/API_DESIGN.md) | Endpoint contracts, filter grammar, error codes, webhooks |
+| [`docs/UI_UX_NOTES.md`](docs/UI_UX_NOTES.md) | Screens, design tokens, the normative grid keyboard map |
+| [`docs/LAUNCH_CHECKLIST.md`](docs/LAUNCH_CHECKLIST.md) | Ship gates, with 🔒 blockers marked |
+
+### ⚠️ Read this before continuing the build
+
+[`docs/SPEC_RECONCILIATION.md`](docs/SPEC_RECONCILIATION.md) records where the current code diverges
+from the specifications above. Steps 1–7 were implemented before the companion documents were
+available, so their contents were inferred from `CLAUDE.md`'s descriptions of them.
+
+Most of the divergence is cosmetic or a defensible alternative, but three items are genuine
+correctness problems — most importantly, **variant inheritance is implemented backwards** relative to
+Tech Spec §2.5. Fix that before building anything else on top of variants.
