@@ -183,6 +183,11 @@ export interface ItemDraft {
   variantParentId?: string | null;
   isVariantModel?: boolean;
   variantAxisValues?: Record<string, string> | null;
+  /**
+   * Import match: apply this draft as an *update* to an existing item instead
+   * of creating one, so a match-key import stays a single change set.
+   */
+  matchItemId?: string;
 }
 
 export interface ChangeTarget {

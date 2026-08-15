@@ -145,6 +145,29 @@ export function GridWorkspace(props: GridWorkspaceProps) {
           />
           Incomplete only
         </label>
+
+        <button
+          type="button"
+          className="ml-auto rounded border px-2 py-1 text-xs hover:bg-[var(--color-muted)]"
+          title="Export the current view as CSV — same filters, same sort"
+          onClick={() => {
+            void api.exports
+              .create({
+                itemTypeId: props.itemType.id,
+                sort,
+                search: search || undefined,
+                incompleteOnly: incompleteOnly || undefined,
+              })
+              .then((result) => {
+                window.location.assign(result.downloadUrl);
+              })
+              .catch(() => {
+                /* the toolbar is not the place for an error panel; retry works */
+              });
+          }}
+        >
+          Export CSV
+        </button>
       </div>
 
       <div className="min-h-0 flex-1">

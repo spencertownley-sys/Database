@@ -244,7 +244,7 @@ async function expandForOperation(
 // value coercion
 // ---------------------------------------------------------------------------
 
-async function buildCoerceContext(
+export async function buildCoerceContext(
   tx: Tx,
   workspaceId: string,
 ): Promise<CoerceContext> {
@@ -512,10 +512,14 @@ function planOne(
 }
 
 async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<PlannedEntry[]> {
-  const drafts = (input.target.drafts ?? []) as ItemDraft[];
-  if (drafts.length === 0) {
+  const allDrafts = (input.target.drafts ?? []) as ItemDraft[];
+  if (allDrafts.length === 0) {
     throw new AppError('VALIDATION_ERROR', 'Nothing to create.');
   }
+
+  // Match-key rows (imports) apply as updates inside the same change set.
+  const matchedDrafts = allDrafts.filter((d) => d.matchItemId);
+  const drafts = allDrafts.filter((d) => !d.matchItemId);
 
   const defaultTypeId = input.itemTypeId;
   const parentIds = [
@@ -616,6 +620,43 @@ async function planCreates(plan: PlanContext, input: ChangeSetInput): Promise<Pl
       title: draft.title,
       skipped: false,
     });
+  }
+
+  if (matchedDrafts.length > 0) {
+    const matchedIds = [...new Set(matchedDrafts.map((d) => d.matchItemId as string))];
+    const existing = await loadItems(plan.tx, plan.workspaceId, matchedIds);
+    const existingById = new Map(existing.map((i) => [i.id, i]));
+
+    for (const draft of matchedDrafts) {
+      const item = existingById.get(draft.matchItemId as string);
+      if (!item) {
+        throw new AppError(
+          'NOT_FOUND',
+          'A matched item no longer exists — re-validate the import before committing.',
+        );
+      }
+      const fields = plan.fieldsByType.get(item.itemTypeId) ?? [];
+      const outcome = applyValuePatch(
+        item.values,
+        item.invalidValues,
+        draft.values ?? {},
+        fields,
+        plan.coerceCtx,
+      );
+      const before = snapshotOf(item);
+      const after: ItemSnapshot = {
+        ...before,
+        // An empty incoming title means "keep what the item has" — a matched
+        // update never blanks a title because the column was unmapped.
+        title: draft.title.trim() !== '' ? draft.title : before.title,
+        values: outcome.values,
+        invalidValues: outcome.invalidValues,
+        treeNodeIds: draft.treeNodeIds?.length
+          ? [...new Set([...before.treeNodeIds, ...draft.treeNodeIds])].sort()
+          : before.treeNodeIds,
+      };
+      entries.push({ before, after, title: after.title, skipped: false });
+    }
   }
 
   // Creating variants makes their model a variant model, in the same change
@@ -801,11 +842,13 @@ export async function previewChangeSet(
 
   const targetIds = await resolveTargetIds(tx, ctx.workspaceId, input.target, input.operation);
 
-  if (targetIds.length > MAX_ITEMS_PER_CHANGE_SET) {
+  const draftCount = input.target.drafts?.length ?? 0;
+  if (targetIds.length > MAX_ITEMS_PER_CHANGE_SET || draftCount > MAX_ITEMS_PER_CHANGE_SET) {
+    const count = Math.max(targetIds.length, draftCount);
     throw new AppError(
       'TARGET_TOO_LARGE',
-      `That would change ${targetIds.length.toLocaleString()} items. Narrow the selection to ${MAX_ITEMS_PER_CHANGE_SET.toLocaleString()} or fewer.`,
-      { count: targetIds.length, limit: MAX_ITEMS_PER_CHANGE_SET },
+      `That would change ${count.toLocaleString()} items. Narrow the selection to ${MAX_ITEMS_PER_CHANGE_SET.toLocaleString()} or fewer.`,
+      { count, limit: MAX_ITEMS_PER_CHANGE_SET },
     );
   }
 

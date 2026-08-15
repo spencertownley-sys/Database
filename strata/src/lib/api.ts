@@ -156,6 +156,25 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return fromWire(parsed) as T;
 }
 
+/** Multipart variant — the browser sets the boundary content-type itself. */
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (workspaceId) headers['x-workspace-id'] = workspaceId;
+
+  const response = await fetch(path, {
+    method: 'POST',
+    headers,
+    body: form,
+    credentials: 'same-origin',
+  });
+  const text = await response.text();
+  const parsed: unknown = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new ApiError(response.status, parsed as ConstructorParameters<typeof ApiError>[1]);
+  }
+  return fromWire(parsed) as T;
+}
+
 export interface ListItemsParams {
   itemTypeId?: string;
   filter?: FilterGroup;
@@ -350,4 +369,112 @@ export const api = {
     discard: (id: string) =>
       request<{ discarded: true }>(`/api/v1/change-sets/${id}`, { method: 'DELETE' }),
   },
+
+  imports: {
+    create: (file: File, itemTypeId: string, profileId?: string) => {
+      const form = new FormData();
+      form.set('file', file);
+      form.set('item_type_id', itemTypeId);
+      if (profileId) form.set('import_profile_id', profileId);
+      return requestForm<ImportJobWire>('/api/v1/imports', form);
+    },
+
+    get: (id: string, signal?: AbortSignal) =>
+      request<ImportJobWire>(`/api/v1/imports/${id}`, { signal }),
+
+    setMapping: (
+      id: string,
+      body: {
+        mapping: Record<string, string>;
+        matchKey?: string | null;
+        options?: { hasHeaderRow?: boolean; onMatch?: 'update' | 'skip' };
+        saveAsProfile?: string;
+      },
+    ) => request<ImportJobWire>(`/api/v1/imports/${id}/mapping`, { method: 'PATCH', body }),
+
+    commit: (id: string) =>
+      request<ImportJobWire>(`/api/v1/imports/${id}/commit`, { method: 'POST' }),
+  },
+
+  importProfiles: {
+    list: (itemTypeId?: string, signal?: AbortSignal) =>
+      request<Collection<ImportProfileWire>>(
+        `/api/v1/import-profiles${itemTypeId ? `?item_type_id=${itemTypeId}` : ''}`,
+        { signal },
+      ),
+    delete: (id: string) =>
+      request<{ deleted: true }>(`/api/v1/import-profiles/${id}`, { method: 'DELETE' }),
+  },
+
+  exports: {
+    create: (body: {
+      itemTypeId: string;
+      filter?: FilterGroup;
+      sort?: SortSpec[];
+      search?: string;
+      incompleteOnly?: boolean;
+      visibleFieldKeys?: string[];
+    }) =>
+      request<{
+        id: string;
+        status: string;
+        rowCount: number;
+        downloadUrl: string;
+        expiresAt: string | null;
+      }>('/api/v1/exports', { method: 'POST', body }),
+  },
 };
+
+export interface ImportColumnSuggestion {
+  index: number;
+  name: string;
+  samples: string[];
+  suggestedFieldKey: string | null;
+  confidence: number;
+}
+
+export interface ImportJobWire {
+  id: string;
+  status: string;
+  itemTypeId: string;
+  profileId: string | null;
+  fileName: string;
+  rowCount: number;
+  mapping: Record<string, string>;
+  matchKey: string | null;
+  options: { hasHeaderRow?: boolean; onMatch?: 'update' | 'skip' };
+  detectedHeaders: string[] | null;
+  previewRows: string[][] | null;
+  validCount: number;
+  errorCount: number;
+  warningCount: number;
+  willCreate: number;
+  willUpdate: number;
+  report: {
+    rowCount: number;
+    newCount: number;
+    matchedCount: number;
+    columns: Array<{
+      header: string;
+      fieldKey: string | null;
+      coerced: number;
+      invalid: number;
+      empty: number;
+      samples: string[];
+    }>;
+    errors: Array<{ row: number; column: string; value: string; message: string }>;
+  } | null;
+  errorFileUrl: string | null;
+  changeSetId: string | null;
+  detectedColumns?: ImportColumnSuggestion[];
+  appliedCount?: number;
+  skippedCount?: number;
+}
+
+export interface ImportProfileWire {
+  id: string;
+  itemTypeId: string;
+  name: string;
+  mapping: Record<string, string>;
+  matchKey: string | null;
+}

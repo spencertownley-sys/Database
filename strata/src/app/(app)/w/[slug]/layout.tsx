@@ -78,6 +78,14 @@ export default async function WorkspaceLayout({
                   Category trees
                 </Link>
               </li>
+              <li>
+                <Link
+                  href={`/w/${slug}/import`}
+                  className="flex items-center rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
+                >
+                  Import
+                </Link>
+              </li>
             </ul>
             <p className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-ink-subtle)]">
               Item types
