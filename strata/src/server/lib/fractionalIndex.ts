@@ -17,7 +17,7 @@
  *    preserves the invariant; `assertValidKey` enforces it at the boundary.
  *  - **Keys are opaque.** Never parse one, sort by anything but the raw
  *    string, or assume a length. Two concurrent inserts at the same slot can
- *    produce equal keys; `(order_key, id)` is the real sort tuple everywhere.
+ *    produce equal keys; `(position, id)` is the real sort tuple everywhere.
  */
 
 import { AppError } from './errors';
