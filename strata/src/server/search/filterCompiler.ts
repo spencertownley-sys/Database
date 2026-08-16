@@ -85,12 +85,19 @@ function asNumber(value: unknown, operator: string): number {
   return n;
 }
 
-function asDate(value: unknown, operator: string): Date {
+/**
+ * Dates bind as ISO strings, never `Date` instances: the app pool runs
+ * `prepare: false` (PgBouncer transaction mode), where postgres-js binds
+ * against server-described parameter types and a raw `Date` object fails
+ * serialization. Every call site casts explicitly (`::timestamptz`), so the
+ * string is unambiguous to Postgres too.
+ */
+function asDate(value: unknown, operator: string): string {
   const dt = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(dt.getTime())) {
     throw new AppError('VALIDATION_ERROR', `"${operator}" needs a date value.`);
   }
-  return dt;
+  return dt.toISOString();
 }
 
 function asList(value: unknown, operator: string): unknown[] {
@@ -163,14 +170,14 @@ function valuePredicate(
       return column === 'number'
         ? sql`${col} = ${asNumber(value, operator)}`
         : column === 'date'
-          ? sql`${col} = ${asDate(value, operator)}`
+          ? sql`${col} = ${asDate(value, operator)}::timestamptz`
           : sql`${col} = ${asString(value, operator)}`;
 
     case 'neq':
       return column === 'number'
         ? sql`${col} <> ${asNumber(value, operator)}`
         : column === 'date'
-          ? sql`${col} <> ${asDate(value, operator)}`
+          ? sql`${col} <> ${asDate(value, operator)}::timestamptz`
           : sql`${col} <> ${asString(value, operator)}`;
 
     case 'contains':
@@ -197,18 +204,18 @@ function valuePredicate(
       return sql`${col} <= ${asNumber(value, operator)}`;
 
     case 'before':
-      return sql`${col} < ${asDate(value, operator)}`;
+      return sql`${col} < ${asDate(value, operator)}::timestamptz`;
     case 'after':
-      return sql`${col} > ${asDate(value, operator)}`;
+      return sql`${col} > ${asDate(value, operator)}::timestamptz`;
     case 'on_or_before':
-      return sql`${col} <= ${asDate(value, operator)}`;
+      return sql`${col} <= ${asDate(value, operator)}::timestamptz`;
     case 'on_or_after':
-      return sql`${col} >= ${asDate(value, operator)}`;
+      return sql`${col} >= ${asDate(value, operator)}::timestamptz`;
 
     case 'between': {
       const [low, high] = asPair(value, operator);
       return column === 'date'
-        ? sql`${col} between ${asDate(low, operator)} and ${asDate(high, operator)}`
+        ? sql`${col} between ${asDate(low, operator)}::timestamptz and ${asDate(high, operator)}::timestamptz`
         : sql`${col} between ${asNumber(low, operator)} and ${asNumber(high, operator)}`;
     }
 
@@ -255,6 +262,7 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
     return sql`not exists (
       select 1 from item_field_index ifi
       where ifi.item_id = ${itemRef}.id
+        and ifi.workspace_id = ${ctx.workspaceId}::uuid
         and ifi.field_id = ${field.id}
         and ${indexColumn(column)} is not null
     )`;
@@ -274,9 +282,14 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
     clause.operator === 'has_none' ||
     clause.operator === 'neq';
 
+  // `workspace_id` is redundant with the item join, but naming it lets the
+  // planner drive selective clauses from the (workspace_id, field_id, value)
+  // partial indexes as a semi-join instead of probing the PK per candidate
+  // row — the difference between hitting and missing the §6.1 budget.
   const exists = sql`exists (
     select 1 from item_field_index ifi
     where ifi.item_id = ${itemRef}.id
+      and ifi.workspace_id = ${ctx.workspaceId}::uuid
       and ifi.field_id = ${field.id}
       and ${predicate}
   )`;
@@ -286,6 +299,7 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
   return sql`(${exists} or not exists (
     select 1 from item_field_index ifi
     where ifi.item_id = ${itemRef}.id
+      and ifi.workspace_id = ${ctx.workspaceId}::uuid
       and ifi.field_id = ${field.id}
       and ${indexColumn(column)} is not null
   ))`;
@@ -427,20 +441,20 @@ function compileNumberColumn(col: SQL, op: FilterOperator, value: unknown): SQL 
 function compileDateColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
   switch (op) {
     case 'eq':
-      return sql`${col}::date = ${asDate(value, op)}::date`;
+      return sql`${col}::date = ${asDate(value, op)}::timestamptz::date`;
     case 'neq':
-      return sql`${col}::date <> ${asDate(value, op)}::date`;
+      return sql`${col}::date <> ${asDate(value, op)}::timestamptz::date`;
     case 'before':
-      return sql`${col} < ${asDate(value, op)}`;
+      return sql`${col} < ${asDate(value, op)}::timestamptz`;
     case 'after':
-      return sql`${col} > ${asDate(value, op)}`;
+      return sql`${col} > ${asDate(value, op)}::timestamptz`;
     case 'on_or_before':
-      return sql`${col} <= ${asDate(value, op)}`;
+      return sql`${col} <= ${asDate(value, op)}::timestamptz`;
     case 'on_or_after':
-      return sql`${col} >= ${asDate(value, op)}`;
+      return sql`${col} >= ${asDate(value, op)}::timestamptz`;
     case 'between': {
       const [low, high] = asPair(value, op);
-      return sql`${col} between ${asDate(low, op)} and ${asDate(high, op)}`;
+      return sql`${col} between ${asDate(low, op)}::timestamptz and ${asDate(high, op)}::timestamptz`;
     }
     case 'in_last_days':
       return sql`${col} >= now() - make_interval(days => ${asNumber(value, op)}) and ${col} <= now()`;
@@ -550,23 +564,26 @@ export interface SortTerm {
   direction: 'asc' | 'desc';
   nullsFirst: boolean;
   valueType: IndexColumn;
+  /** Set for user fields: the projection join `renderSortJoins` must emit. */
+  join?: { alias: string; fieldId: string };
 }
 
 /**
  * Builds the ORDER BY terms.
  *
- * User fields sort through a correlated scalar subquery rather than a join, so
- * a multi-field sort does not multiply rows. The terms are returned structured
- * rather than pre-rendered because keyset pagination needs the same
- * expressions to build its cursor predicate — rendering them twice from two
- * code paths is how a sort and its cursor drift out of agreement and pages
- * start repeating rows.
+ * User fields sort through a LEFT JOIN on the projection's `(item_id,
+ * field_id)` primary key — at most one row per item, so rows never multiply,
+ * and the join hashes once instead of running a correlated subquery per
+ * surviving row (which is what blew the §6.1 filtered-page budget at 100k).
+ * Callers must place `renderSortJoins(terms)` in their FROM clause. The
+ * terms are returned structured because keyset pagination needs the same
+ * expressions for its cursor predicate — rendering them from two code paths
+ * is how a sort and its cursor drift and pages start repeating rows.
  */
 export function buildSortTerms(
   sorts: readonly SortSpec[] | undefined,
   ctx: CompileContext,
 ): SortTerm[] {
-  const itemRef = sql.identifier(ctx.alias ?? 'items');
   const terms: SortTerm[] = [];
 
   for (const spec of sorts ?? []) {
@@ -596,19 +613,31 @@ export function buildSortTerms(
         `"${field.label}" holds several values per item, so it can be grouped but not sorted.`,
       );
     }
+    const alias = `sort_${terms.length}`;
     terms.push({
       field: spec.field,
-      expr: sql`(
-        select ${indexColumn(column)} from item_field_index ifi
-        where ifi.item_id = ${itemRef}.id and ifi.field_id = ${field.id}
-      )`,
+      expr: sql`${sql.identifier(alias)}.${sql.identifier(VALUE_COLUMN[column])}`,
       direction,
       nullsFirst,
       valueType: column,
+      join: { alias, fieldId: field.id },
     });
   }
 
   return terms;
+}
+
+/** The LEFT JOINs backing user-field sort terms — goes in the FROM clause. */
+export function renderSortJoins(terms: readonly SortTerm[], ctx: CompileContext): SQL {
+  const itemRef = sql.identifier(ctx.alias ?? 'items');
+  const joins = terms
+    .filter((t): t is SortTerm & { join: NonNullable<SortTerm['join']> } => Boolean(t.join))
+    .map(
+      (t) => sql` left join item_field_index ${sql.identifier(t.join.alias)}
+        on ${sql.identifier(t.join.alias)}.item_id = ${itemRef}.id
+       and ${sql.identifier(t.join.alias)}.field_id = ${t.join.fieldId}`,
+    );
+  return joins.length ? sql.join(joins, sql` `) : sql``;
 }
 
 export function renderSortTerms(terms: readonly SortTerm[], ctx: CompileContext): SQL {

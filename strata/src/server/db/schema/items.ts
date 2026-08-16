@@ -116,6 +116,12 @@ export const items = pgTable(
       sql`${t.createdAt} desc`,
       sql`${t.id} desc`,
     ),
+    // Backs the grid's default sort (title asc, id asc keyset). Without it,
+    // an unfiltered type view sorts the whole workspace on every page — the
+    // §8/Step 15 EXPLAIN gate catches exactly that seq scan.
+    index('items_title_keyset_idx')
+      .on(t.workspaceId, t.itemTypeId, t.title, t.id)
+      .where(sql`${t.archivedAt} is null`),
     index('items_parent_idx').on(t.parentId, t.position).where(sql`${t.archivedAt} is null`),
     index('items_variant_idx')
       .on(t.variantParentId)

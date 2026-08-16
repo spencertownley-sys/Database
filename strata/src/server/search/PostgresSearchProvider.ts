@@ -24,6 +24,7 @@ import type { FilterGroup, GroupSpec } from '@/types/filters';
 import { isSystemFieldKey } from '@/types/filters';
 import {
   buildSortTerms,
+  renderSortJoins,
   compileFilter,
   renderSortTerms,
   type CompileContext,
@@ -327,7 +328,7 @@ export class PostgresSearchProvider implements SearchProvider {
     // One extra row decides whether there is a next page, without a count.
     const rows = await tx.execute(sql`
       select ${SELECT_COLUMNS}
-      from items ${sql.identifier(ITEM_ALIAS)}
+      from items ${sql.identifier(ITEM_ALIAS)}${renderSortJoins(terms, ctx)}
       where ${where}${keyset ? sql` and ${keyset}` : sql``}
       order by ${renderSortTerms(terms, ctx)}
       limit ${limit + 1}
@@ -513,6 +514,33 @@ function columnName(column: string): string {
 }
 
 export const searchProvider: SearchProvider = new PostgresSearchProvider();
+
+/**
+ * `EXPLAIN (FORMAT JSON)` for exactly the SQL `search()` would run — used by
+ * the perf suite to fail the build when a plan seq-scans `items`. Kept here so
+ * it cannot drift from the real query assembly.
+ */
+export async function explainSearch(
+  tx: Tx,
+  workspaceId: string,
+  fields: readonly Field[],
+  query: SearchQuery,
+): Promise<unknown> {
+  const ctx = contextFor(workspaceId, fields, query.itemTypeId);
+  const terms = buildSortTerms(query.sort, ctx);
+  const where = buildWhere(workspaceId, fields, query);
+  const limit = Math.min(Math.max(query.limit, 1), 500);
+
+  const rows = await tx.execute(sql`
+    explain (format json)
+    select ${SELECT_COLUMNS}
+    from items ${sql.identifier(ITEM_ALIAS)}${renderSortJoins(terms, ctx)}
+    where ${where}
+    order by ${renderSortTerms(terms, ctx)}
+    limit ${limit + 1}
+  `);
+  return ([...rows][0] as Record<string, unknown>)['QUERY PLAN'];
+}
 
 /**
  * Resolves a filter-targeted change set to concrete ids.
