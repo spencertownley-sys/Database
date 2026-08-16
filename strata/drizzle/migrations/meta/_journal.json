@@ -78,6 +78,13 @@
       "when": 1786836787410,
       "tag": "0010_title_keyset_index",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786866923512,
+      "tag": "0011_list_user_workspaces",
+      "breakpoints": true
     }
   ]
 }
