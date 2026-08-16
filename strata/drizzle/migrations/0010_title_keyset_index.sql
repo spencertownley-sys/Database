@@ -1,0 +1,1 @@
+CREATE INDEX "items_title_keyset_idx" ON "items" USING btree ("workspace_id","item_type_id","title","id") WHERE "items"."archived_at" is null;

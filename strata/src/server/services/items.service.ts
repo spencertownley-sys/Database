@@ -21,11 +21,12 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { Tx } from '@/server/db';
 import { items, itemFieldIndex, type Item, type ItemValues, type InvalidValues } from '@/server/db/schema/items';
 import { itemTreeNodes, treeNodes } from '@/server/db/schema/trees';
-import type { Field } from '@/server/db/schema/itemTypes';
+import { fields as fieldsTable, itemTypes, type Field } from '@/server/db/schema/itemTypes';
+import type { ItemDraft } from '@/server/db/schema/changeSets';
 import { AppError } from '@/server/lib/errors';
-import { assertDepthAfterMove, assertNoCycle, childPath, pathDepth } from '@/server/lib/ltree';
+import { assertDepthAfterMove, assertNoCycle, pathDepth } from '@/server/lib/ltree';
 import { computeCompleteness } from './completeness.service';
-import { computeEffectiveValues, ownEffectiveValues } from './variants.service';
+import { computeEffectiveValues, ownEffectiveValues, planVariantCoordinates } from './variants.service';
 import {
   buildSearchText,
   removeProjection,
@@ -39,9 +40,9 @@ export interface ItemSnapshot {
   title: string;
   parentId: string | null;
   path: string;
-  orderKey: string;
+  position: string;
   isVariantModel: boolean;
-  variantOfId: string | null;
+  variantParentId: string | null;
   variantAxisValues: Record<string, string> | null;
   values: ItemValues;
   invalidValues: InvalidValues;
@@ -62,15 +63,15 @@ export function snapshotOf(item: LoadedItem): ItemSnapshot {
     title: item.title,
     parentId: item.parentId,
     path: item.path,
-    orderKey: item.orderKey,
+    position: item.position,
     isVariantModel: item.isVariantModel,
-    variantOfId: item.variantOfId,
+    variantParentId: item.variantParentId,
     variantAxisValues: item.variantAxisValues,
     values: item.values,
     invalidValues: item.invalidValues,
     assigneeId: item.assigneeId,
     treeNodeIds: [...item.treeNodeIds].sort(),
-    deleted: item.deletedAt !== null,
+    deleted: item.archivedAt !== null,
   };
 }
 
@@ -93,7 +94,7 @@ export async function loadItems(
       and(
         eq(items.workspaceId, workspaceId),
         inArray(items.id, [...itemIds]),
-        opts.includeDeleted ? undefined : isNull(items.deletedAt),
+        opts.includeDeleted ? undefined : isNull(items.archivedAt),
       ),
     );
 
@@ -163,7 +164,7 @@ export async function loadSubtreeIds(
     .where(
       and(
         eq(items.workspaceId, workspaceId),
-        isNull(items.deletedAt),
+        isNull(items.archivedAt),
         sql`${items.path} <@ ${root.path}::ltree`,
       ),
     );
@@ -184,8 +185,8 @@ export async function loadVariantsOf(
     .where(
       and(
         eq(items.workspaceId, workspaceId),
-        inArray(items.variantOfId, [...modelIds]),
-        isNull(items.deletedAt),
+        inArray(items.variantParentId, [...modelIds]),
+        isNull(items.archivedAt),
       ),
     );
   return loadItems(
@@ -210,17 +211,17 @@ export function computeDerived(
   snapshot: ItemSnapshot,
   fields: readonly Field[],
   modelValues: ItemValues | null,
+  variantAxes: readonly string[] = [],
 ): DerivedValues {
   const effectiveValues =
-    snapshot.variantOfId && modelValues
-      ? computeEffectiveValues(modelValues, snapshot.values, fields).values
+    snapshot.variantParentId && modelValues
+      ? computeEffectiveValues(modelValues, snapshot.values, fields, variantAxes).values
       : ownEffectiveValues(snapshot.values, fields);
 
   const completeness = computeCompleteness({
     effectiveValues,
     fields,
     invalidValues: snapshot.invalidValues,
-    title: snapshot.title,
   });
 
   return {
@@ -250,16 +251,16 @@ export async function reparentSubtree(
   newParentId: string | null,
 ): Promise<void> {
   const [moving] = await tx
-    .select({ path: items.path, parentId: items.parentId, variantOfId: items.variantOfId, isVariantModel: items.isVariantModel })
+    .select({ path: items.path, parentId: items.parentId, variantParentId: items.variantParentId, isVariantModel: items.isVariantModel })
     .from(items)
     .where(and(eq(items.workspaceId, workspaceId), eq(items.id, itemId)))
     .limit(1);
 
   if (!moving) throw new AppError('NOT_FOUND', 'That item no longer exists.');
 
-  if (moving.variantOfId !== null) {
+  if (moving.variantParentId !== null) {
     throw new AppError(
-      'VARIANT_CANNOT_HAVE_CHILDREN',
+      'VARIANT_CONSTRAINT',
       'Variants live outside the work hierarchy. Move the product instead.',
     );
   }
@@ -267,20 +268,20 @@ export async function reparentSubtree(
   let newParentPath: string | null = null;
   if (newParentId !== null) {
     const [parent] = await tx
-      .select({ path: items.path, variantOfId: items.variantOfId, isVariantModel: items.isVariantModel })
+      .select({ path: items.path, variantParentId: items.variantParentId, isVariantModel: items.isVariantModel })
       .from(items)
-      .where(and(eq(items.workspaceId, workspaceId), eq(items.id, newParentId), isNull(items.deletedAt)))
+      .where(and(eq(items.workspaceId, workspaceId), eq(items.id, newParentId), isNull(items.archivedAt)))
       .limit(1);
 
     if (!parent) throw new AppError('NOT_FOUND', 'The destination item no longer exists.');
     if (parent.isVariantModel) {
       throw new AppError(
-        'VARIANT_MODEL_CANNOT_BE_NESTED',
+        'VARIANT_CONSTRAINT',
         'A product with variants cannot contain other items.',
       );
     }
-    if (parent.variantOfId !== null) {
-      throw new AppError('VARIANT_CANNOT_HAVE_CHILDREN', 'A variant cannot contain other items.');
+    if (parent.variantParentId !== null) {
+      throw new AppError('VARIANT_CONSTRAINT', 'A variant cannot contain other items.');
     }
     newParentPath = parent.path;
     assertNoCycle(moving.path, newParentPath);
@@ -299,11 +300,12 @@ export async function reparentSubtree(
     newParentPath ? pathDepth(newParentPath) : 0,
   );
 
-  const newPath = childPath(newParentPath, itemId);
-
+  // Offset is `nlevel(old) - 1` so the moving row keeps its own label;
+  // `subpath(p, nlevel(p))` would be an empty slice, which ltree rejects.
   await tx.execute(sql`
     update items
-    set path = ${newPath}::ltree || subpath(path, nlevel(${moving.path}::ltree)),
+    set path = ${newParentPath ?? ''}::ltree || subpath(path, nlevel(${moving.path}::ltree) - 1),
+        depth = nlevel(${newParentPath ?? ''}::ltree || subpath(path, nlevel(${moving.path}::ltree) - 1)) - 1,
         updated_at = now()
     where workspace_id = ${workspaceId}
       and path <@ ${moving.path}::ltree
@@ -313,6 +315,86 @@ export async function reparentSubtree(
     .update(items)
     .set({ parentId: newParentId, updatedAt: new Date() })
     .where(and(eq(items.workspaceId, workspaceId), eq(items.id, itemId)));
+}
+
+// ---------------------------------------------------------------------------
+// variant generation
+// ---------------------------------------------------------------------------
+
+export interface VariantGenerationPlan {
+  itemTypeId: string;
+  drafts: ItemDraft[];
+  adding: number;
+  skippedExisting: number;
+  existingCount: number;
+}
+
+/**
+ * Loads everything `planVariantCoordinates` needs and turns its coordinates
+ * into `create` drafts for one change set. Axis values land in the variant's
+ * own `values` — the §2.5 axis pass reads them from there.
+ */
+export async function planVariantGeneration(
+  tx: Tx,
+  workspaceId: string,
+  modelId: string,
+  axisValues: Record<string, readonly string[]>,
+): Promise<VariantGenerationPlan> {
+  const [model] = await loadItems(tx, workspaceId, [modelId]);
+  if (!model) throw new AppError('NOT_FOUND', 'That item no longer exists.');
+
+  const [type] = await tx
+    .select({ variantAxes: itemTypes.variantAxes })
+    .from(itemTypes)
+    .where(and(eq(itemTypes.workspaceId, workspaceId), eq(itemTypes.id, model.itemTypeId)))
+    .limit(1);
+  if (!type) throw new AppError('NOT_FOUND', 'The item type no longer exists.');
+
+  const fields = await tx
+    .select()
+    .from(fieldsTable)
+    .where(
+      and(
+        eq(fieldsTable.workspaceId, workspaceId),
+        eq(fieldsTable.itemTypeId, model.itemTypeId),
+        isNull(fieldsTable.deletedAt),
+      ),
+    );
+
+  const existingVariants = await tx
+    .select({ variantAxisValues: items.variantAxisValues })
+    .from(items)
+    .where(
+      and(
+        eq(items.workspaceId, workspaceId),
+        eq(items.variantParentId, modelId),
+        isNull(items.archivedAt),
+      ),
+    );
+
+  const plan = planVariantCoordinates({
+    model,
+    variantAxes: type.variantAxes,
+    fields,
+    axisValues,
+    existingCoordinates: existingVariants.map((v) => v.variantAxisValues),
+  });
+
+  const drafts: ItemDraft[] = plan.coordinates.map((coordinate, i) => ({
+    title: plan.titles[i] as string,
+    itemTypeId: model.itemTypeId,
+    values: coordinate,
+    variantParentId: modelId,
+    variantAxisValues: coordinate,
+  }));
+
+  return {
+    itemTypeId: model.itemTypeId,
+    drafts,
+    adding: drafts.length,
+    skippedExisting: plan.skippedExisting,
+    existingCount: plan.existingCount,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -403,16 +485,17 @@ export async function applySnapshots(
         title: snapshot.title,
         parentId: snapshot.parentId,
         path: snapshot.path,
-        orderKey: snapshot.orderKey,
+        depth: pathDepth(snapshot.path) - 1,
+        position: snapshot.position,
         isVariantModel: snapshot.isVariantModel,
-        variantOfId: snapshot.variantOfId,
+        variantParentId: snapshot.variantParentId,
         variantAxisValues: snapshot.variantAxisValues,
         values: snapshot.values,
         invalidValues: snapshot.invalidValues,
         assigneeId: snapshot.assigneeId,
         createdBy: ctx.actorId,
         updatedBy: ctx.actorId,
-        deletedAt: snapshot.deleted ? now : null,
+        archivedAt: snapshot.deleted ? now : null,
       })
       .onConflictDoUpdate({
         target: items.id,
@@ -421,16 +504,17 @@ export async function applySnapshots(
           title: snapshot.title,
           parentId: snapshot.parentId,
           path: sql`${snapshot.path}::ltree`,
-          orderKey: snapshot.orderKey,
+          depth: pathDepth(snapshot.path) - 1,
+          position: snapshot.position,
           isVariantModel: snapshot.isVariantModel,
-          variantOfId: snapshot.variantOfId,
+          variantParentId: snapshot.variantParentId,
           variantAxisValues: snapshot.variantAxisValues,
           values: snapshot.values,
           invalidValues: snapshot.invalidValues,
           assigneeId: snapshot.assigneeId,
           updatedBy: ctx.actorId,
           updatedAt: now,
-          deletedAt: snapshot.deleted ? now : null,
+          archivedAt: snapshot.deleted ? now : null,
         },
       });
   }
@@ -443,16 +527,17 @@ export async function applySnapshots(
         title: snapshot.title,
         parentId: snapshot.parentId,
         path: sql`${snapshot.path}::ltree`,
-        orderKey: snapshot.orderKey,
+        depth: pathDepth(snapshot.path) - 1,
+        position: snapshot.position,
         isVariantModel: snapshot.isVariantModel,
-        variantOfId: snapshot.variantOfId,
+        variantParentId: snapshot.variantParentId,
         variantAxisValues: snapshot.variantAxisValues,
         values: snapshot.values,
         invalidValues: snapshot.invalidValues,
         assigneeId: snapshot.assigneeId,
         updatedBy: ctx.actorId,
         updatedAt: now,
-        deletedAt: snapshot.deleted ? now : null,
+        archivedAt: snapshot.deleted ? now : null,
       })
       .where(and(eq(items.workspaceId, ctx.workspaceId), eq(items.id, snapshot.id)));
   }
@@ -462,7 +547,7 @@ export async function applySnapshots(
     // reconstruction, and so a relation pointing at it does not dangle.
     await tx
       .update(items)
-      .set({ deletedAt: now, updatedBy: ctx.actorId, updatedAt: now })
+      .set({ archivedAt: now, updatedBy: ctx.actorId, updatedAt: now })
       .where(and(eq(items.workspaceId, ctx.workspaceId), inArray(items.id, toDelete)));
     await tx.delete(itemFieldIndex).where(inArray(itemFieldIndex.itemId, toDelete));
   }
@@ -549,7 +634,7 @@ async function syncTreeMemberships(
         select tn.id, count(itn.item_id)::int as n
         from tree_nodes tn
         left join item_tree_nodes itn on itn.tree_node_id = tn.id
-        left join items i on i.id = itn.item_id and i.deleted_at is null
+        left join items i on i.id = itn.item_id and i.archived_at is null
         where tn.workspace_id = ${ctx.workspaceId}
           and tn.id in ${sql`(${sql.join(affectedNodes.map((id) => sql`${id}::uuid`), sql`, `)})`}
         group by tn.id
@@ -596,13 +681,24 @@ export async function recomputeDerived(
   const ordered = [...models, ...loaded.filter((i) => !i.isVariantModel), ...extraVariants];
 
   const modelIdsNeeded = [
-    ...new Set(ordered.map((i) => i.variantOfId).filter((id): id is string => id !== null)),
+    ...new Set(ordered.map((i) => i.variantParentId).filter((id): id is string => id !== null)),
   ];
   const modelRows = await loadItems(tx, ctx.workspaceId, modelIdsNeeded, { includeDeleted: true });
   const modelValues = new Map<string, ItemValues>([
     ...models.map((m) => [m.id, m.values] as const),
     ...modelRows.map((m) => [m.id, m.values] as const),
   ]);
+
+  // Axis fields resolve to the variant's own value regardless of inheritance,
+  // so resolution needs each type's declared axes alongside its fields.
+  const typeIdsInBatch = [...new Set(ordered.map((i) => i.itemTypeId))];
+  const axisRows = typeIdsInBatch.length
+    ? await tx
+        .select({ id: itemTypes.id, variantAxes: itemTypes.variantAxes })
+        .from(itemTypes)
+        .where(and(eq(itemTypes.workspaceId, ctx.workspaceId), inArray(itemTypes.id, typeIdsInBatch)))
+    : [];
+  const axesByType = new Map(axisRows.map((r) => [r.id, r.variantAxes]));
 
   const projectionTargets: Array<{
     itemId: string;
@@ -616,7 +712,8 @@ export async function recomputeDerived(
     const derived = computeDerived(
       snapshotOf(item),
       fields,
-      item.variantOfId ? (modelValues.get(item.variantOfId) ?? null) : null,
+      item.variantParentId ? (modelValues.get(item.variantParentId) ?? null) : null,
+      axesByType.get(item.itemTypeId) ?? [],
     );
 
     await tx
@@ -629,7 +726,7 @@ export async function recomputeDerived(
       })
       .where(and(eq(items.workspaceId, ctx.workspaceId), eq(items.id, item.id)));
 
-    if (item.deletedAt === null) {
+    if (item.archivedAt === null) {
       projectionTargets.push({
         itemId: item.id,
         itemTypeId: item.itemTypeId,

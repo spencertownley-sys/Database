@@ -105,10 +105,13 @@ export async function syncProjection(
     }
   }
 
-  if (upserts.length > 0) {
+  // Chunked: each row binds 10 parameters and Postgres caps a statement at
+  // 65,534 — a 5,000-item import with a handful of indexed fields blows
+  // through that in one statement. 4,000 rows = 40k parameters, safely under.
+  for (let i = 0; i < upserts.length; i += 4_000) {
     await tx
       .insert(itemFieldIndex)
-      .values(upserts)
+      .values(upserts.slice(i, i + 4_000))
       .onConflictDoUpdate({
         target: [itemFieldIndex.itemId, itemFieldIndex.fieldId],
         set: {

@@ -12,11 +12,12 @@ import { items } from '@/server/db/schema/items';
 import { AppError } from '@/server/lib/errors';
 import { appendKeys, firstKey } from '@/server/lib/fractionalIndex';
 import { PRESETS_BY_KEY, type ItemTypePreset } from '@/components/type-builder/presets';
+import { ALWAYS_INDEXED_TYPES } from './fields.service';
 import { VARIANT_AXIS_TYPES } from '@/types/fields';
 
 export interface ItemTypeWithSchema extends ItemType {
   fields: Field[];
-  groups: FieldGroup[];
+  fieldGroups: FieldGroup[];
 }
 
 const KEY_RE = /^[a-z][a-z0-9_]{0,62}$/;
@@ -50,7 +51,7 @@ export function slugifyKey(name: string, taken: ReadonlySet<string> = new Set())
 export function assertValidKey(key: string): void {
   if (!KEY_RE.test(key)) {
     throw new AppError(
-      'VALIDATION_FAILED',
+      'VALIDATION_ERROR',
       `"${key}" is not a valid key. Use lowercase letters, digits and underscores, starting with a letter.`,
     );
   }
@@ -60,8 +61,8 @@ export async function listItemTypes(tx: Tx, workspaceId: string): Promise<ItemTy
   return tx
     .select()
     .from(itemTypes)
-    .where(and(eq(itemTypes.workspaceId, workspaceId), isNull(itemTypes.deletedAt)))
-    .orderBy(asc(itemTypes.name));
+    .where(and(eq(itemTypes.workspaceId, workspaceId), isNull(itemTypes.archivedAt)))
+    .orderBy(asc(itemTypes.label));
 }
 
 /**
@@ -82,37 +83,37 @@ export async function getItemTypeWithSchema(
       and(
         eq(itemTypes.workspaceId, workspaceId),
         eq(itemTypes.id, itemTypeId),
-        isNull(itemTypes.deletedAt),
+        isNull(itemTypes.archivedAt),
       ),
     )
     .limit(1);
 
   if (!type) throw new AppError('NOT_FOUND', 'That item type no longer exists.');
 
-  const [typeFields, groups] = await Promise.all([
+  const [typeFields, typeGroups] = await Promise.all([
     tx
       .select()
       .from(fieldsTable)
       .where(and(eq(fieldsTable.itemTypeId, itemTypeId), isNull(fieldsTable.deletedAt)))
-      .orderBy(asc(fieldsTable.orderKey)),
+      .orderBy(asc(fieldsTable.position)),
     tx
       .select()
       .from(fieldGroups)
       .where(eq(fieldGroups.itemTypeId, itemTypeId))
-      .orderBy(asc(fieldGroups.orderKey)),
+      .orderBy(asc(fieldGroups.position)),
   ]);
 
-  return { ...type, fields: typeFields, groups };
+  return { ...type, fields: typeFields, fieldGroups: typeGroups };
 }
 
 export interface CreateItemTypeInput {
   key?: string;
-  name: string;
-  pluralName?: string;
+  label: string;
+  pluralLabel?: string;
   description?: string;
   icon?: string;
   color?: string;
-  presetKey?: string;
+  presetSource?: string;
 }
 
 export async function createItemType(
@@ -123,7 +124,7 @@ export async function createItemType(
 ): Promise<ItemType> {
   const existing = await listItemTypes(tx, workspaceId);
   const taken = new Set(existing.map((t) => t.key));
-  const key = input.key ?? slugifyKey(input.name, taken);
+  const key = input.key ?? slugifyKey(input.label, taken);
   assertValidKey(key);
   if (taken.has(key)) {
     throw new AppError('CONFLICT', `An item type with the key "${key}" already exists.`);
@@ -134,17 +135,17 @@ export async function createItemType(
     .values({
       workspaceId,
       key,
-      name: input.name,
-      pluralName: input.pluralName ?? `${input.name}s`,
+      label: input.label,
+      pluralLabel: input.pluralLabel ?? `${input.label}s`,
       description: input.description ?? null,
       icon: input.icon ?? 'square',
       color: input.color ?? 'slate',
-      presetKey: input.presetKey ?? null,
+      presetSource: input.presetSource ?? null,
       createdBy: actorId,
     })
     .returning();
 
-  if (!created) throw new AppError('INTERNAL', 'Item type was not created.');
+  if (!created) throw new AppError('INTERNAL_ERROR', 'Item type was not created.');
   return created;
 }
 
@@ -168,12 +169,12 @@ export async function createItemTypeFromPreset(
     workspaceId,
     {
       key: overrides.key,
-      name: overrides.name ?? preset.name,
-      pluralName: preset.pluralName,
+      label: overrides.name ?? preset.label,
+      pluralLabel: preset.pluralLabel,
       description: preset.description,
       icon: preset.icon,
       color: preset.color,
-      presetKey: preset.key,
+      presetSource: preset.key,
     },
     actorId,
   );
@@ -189,7 +190,7 @@ export async function createItemTypeFromPreset(
     type.variantAxes = preset.variantAxes;
   }
 
-  return { ...type, fields, groups };
+  return { ...type, fields, fieldGroups: groups };
 }
 
 async function applyPresetSchema(
@@ -209,7 +210,7 @@ async function applyPresetSchema(
             itemTypeId,
             key: g.key,
             label: g.label,
-            orderKey: groupKeys[i] ?? firstKey(),
+            position: groupKeys[i] ?? firstKey(),
             collapsedByDefault: g.collapsedByDefault ?? false,
           })),
         )
@@ -232,13 +233,12 @@ async function applyPresetSchema(
             type: f.type,
             config: f.config ?? {},
             helpText: f.helpText ?? null,
-            required: f.required ?? false,
+            requiredForCompleteness: f.requiredForCompleteness ?? false,
             defaultValue: f.defaultValue ?? null,
-            inheritance: f.inheritance ?? 'shared',
-            isIndexed: f.isIndexed ?? false,
+            inheritance: f.inheritance ?? 'variant',
+            isIndexed: ALWAYS_INDEXED_TYPES.has(f.type) || (f.isIndexed ?? false),
             isSearchable: f.isSearchable ?? false,
-            countsTowardCompleteness: f.countsTowardCompleteness ?? true,
-            orderKey: fieldOrderKeys[i] ?? firstKey(),
+            position: fieldOrderKeys[i] ?? firstKey(),
             createdBy: actorId,
           })),
         )
@@ -258,17 +258,17 @@ export function assertVariantAxes(axisKeys: readonly string[], typeFields: reado
   for (const key of axisKeys) {
     const field = byKey.get(key);
     if (!field) {
-      throw new AppError('VARIANT_AXIS_INVALID', `There is no field named "${key}" to use as an axis.`);
+      throw new AppError('INVALID_VARIANT_AXIS', `There is no field named "${key}" to use as an axis.`);
     }
     if (!VARIANT_AXIS_TYPES.has(field.type)) {
       throw new AppError(
-        'VARIANT_AXIS_INVALID',
+        'INVALID_VARIANT_AXIS',
         `"${field.label}" is a ${field.type} field. Variant axes must be single-select fields.`,
       );
     }
     if (field.inheritance !== 'variant') {
       throw new AppError(
-        'VARIANT_AXIS_INVALID',
+        'INVALID_VARIANT_AXIS',
         `"${field.label}" must be set to vary per variant before it can be an axis.`,
       );
     }
@@ -279,7 +279,7 @@ export async function updateItemType(
   tx: Tx,
   workspaceId: string,
   itemTypeId: string,
-  patch: Partial<Pick<ItemType, 'name' | 'pluralName' | 'description' | 'icon' | 'color' | 'variantAxes'>>,
+  patch: Partial<Pick<ItemType, 'label' | 'pluralLabel' | 'description' | 'icon' | 'color' | 'variantAxes'>>,
 ): Promise<ItemType> {
   if (patch.variantAxes) {
     const { fields } = await getItemTypeWithSchema(tx, workspaceId, itemTypeId);
@@ -313,13 +313,13 @@ export async function deleteItemType(
       and(
         eq(items.workspaceId, workspaceId),
         eq(items.itemTypeId, itemTypeId),
-        isNull(items.deletedAt),
+        isNull(items.archivedAt),
       ),
     );
 
   if (count > 0) {
     throw new AppError(
-      'ITEM_TYPE_IN_USE',
+      'TYPE_IN_USE',
       `${count} item${count === 1 ? '' : 's'} still use this type. Delete or re-type them first.`,
       { itemCount: count },
     );
@@ -327,6 +327,6 @@ export async function deleteItemType(
 
   await tx
     .update(itemTypes)
-    .set({ deletedAt: new Date() })
+    .set({ archivedAt: new Date() })
     .where(and(eq(itemTypes.workspaceId, workspaceId), eq(itemTypes.id, itemTypeId)));
 }

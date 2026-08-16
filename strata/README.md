@@ -78,7 +78,7 @@ Then open **http://localhost:3000/w/northwind**.
 `STRATA_DEV_USER` is the local auth fallback for running without a Supabase
 project. It only works when `NODE_ENV !== 'production'` *and* Supabase is
 unconfigured, and it is inert in a production build. Seeded addresses:
-`alice@northwind.test` (owner), `bob@` (editor), `carol@` (viewer),
+`alice@northwind.test` (owner), `bob@` (member), `carol@` (viewer),
 `dana@client.test` (guest).
 
 ```bash

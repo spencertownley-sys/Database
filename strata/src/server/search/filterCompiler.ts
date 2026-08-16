@@ -74,41 +74,48 @@ function likeEscape(value: string): string {
 function asString(value: unknown, operator: string): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  throw new AppError('VALIDATION_FAILED', `"${operator}" needs a text value.`);
+  throw new AppError('VALIDATION_ERROR', `"${operator}" needs a text value.`);
 }
 
 function asNumber(value: unknown, operator: string): number {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(n)) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs a numeric value.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs a numeric value.`);
   }
   return n;
 }
 
-function asDate(value: unknown, operator: string): Date {
+/**
+ * Dates bind as ISO strings, never `Date` instances: the app pool runs
+ * `prepare: false` (PgBouncer transaction mode), where postgres-js binds
+ * against server-described parameter types and a raw `Date` object fails
+ * serialization. Every call site casts explicitly (`::timestamptz`), so the
+ * string is unambiguous to Postgres too.
+ */
+function asDate(value: unknown, operator: string): string {
   const dt = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(dt.getTime())) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs a date value.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs a date value.`);
   }
-  return dt;
+  return dt.toISOString();
 }
 
 function asList(value: unknown, operator: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs a list of values.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs a list of values.`);
   }
   if (value.length === 0) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs at least one value.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs at least one value.`);
   }
   if (value.length > 1000) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" accepts at most 1000 values.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" accepts at most 1000 values.`);
   }
   return value;
 }
 
 function asPair(value: unknown, operator: string): [unknown, unknown] {
   if (!Array.isArray(value) || value.length !== 2) {
-    throw new AppError('VALIDATION_FAILED', `"${operator}" needs exactly two values.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator}" needs exactly two values.`);
   }
   return [value[0], value[1]];
 }
@@ -137,7 +144,7 @@ function assertOperatorForColumn(
 
   if (!allowed[column].includes(operator)) {
     throw new AppError(
-      'VALIDATION_FAILED',
+      'VALIDATION_ERROR',
       `"${operator.replace(/_/g, ' ')}" cannot be used on ${fieldLabel}.`,
       { operator, fieldLabel },
     );
@@ -163,14 +170,14 @@ function valuePredicate(
       return column === 'number'
         ? sql`${col} = ${asNumber(value, operator)}`
         : column === 'date'
-          ? sql`${col} = ${asDate(value, operator)}`
+          ? sql`${col} = ${asDate(value, operator)}::timestamptz`
           : sql`${col} = ${asString(value, operator)}`;
 
     case 'neq':
       return column === 'number'
         ? sql`${col} <> ${asNumber(value, operator)}`
         : column === 'date'
-          ? sql`${col} <> ${asDate(value, operator)}`
+          ? sql`${col} <> ${asDate(value, operator)}::timestamptz`
           : sql`${col} <> ${asString(value, operator)}`;
 
     case 'contains':
@@ -197,18 +204,18 @@ function valuePredicate(
       return sql`${col} <= ${asNumber(value, operator)}`;
 
     case 'before':
-      return sql`${col} < ${asDate(value, operator)}`;
+      return sql`${col} < ${asDate(value, operator)}::timestamptz`;
     case 'after':
-      return sql`${col} > ${asDate(value, operator)}`;
+      return sql`${col} > ${asDate(value, operator)}::timestamptz`;
     case 'on_or_before':
-      return sql`${col} <= ${asDate(value, operator)}`;
+      return sql`${col} <= ${asDate(value, operator)}::timestamptz`;
     case 'on_or_after':
-      return sql`${col} >= ${asDate(value, operator)}`;
+      return sql`${col} >= ${asDate(value, operator)}::timestamptz`;
 
     case 'between': {
       const [low, high] = asPair(value, operator);
       return column === 'date'
-        ? sql`${col} between ${asDate(low, operator)} and ${asDate(high, operator)}`
+        ? sql`${col} between ${asDate(low, operator)}::timestamptz and ${asDate(high, operator)}::timestamptz`
         : sql`${col} between ${asNumber(low, operator)} and ${asNumber(high, operator)}`;
     }
 
@@ -230,7 +237,7 @@ function valuePredicate(
       return sql`not (${col} && ${asList(value, operator) as string[]}::text[])`;
 
     default:
-      throw new AppError('VALIDATION_FAILED', `Unknown filter operator "${String(operator)}".`);
+      throw new AppError('VALIDATION_ERROR', `Unknown filter operator "${String(operator)}".`);
   }
 }
 
@@ -239,10 +246,11 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
   if (!field) {
     // Never fall through to a raw column name. An unresolved key is the only
     // way caller input could reach SQL uncontrolled, so it is a hard error.
-    throw new AppError('VALIDATION_FAILED', `There is no field named "${clause.field}".`, {
+    throw new AppError('VALIDATION_ERROR', `There is no field named "${clause.field}".`, {
       field: clause.field,
     });
   }
+  assertFilterable(field);
 
   const column = indexColumnFor(field.type, field.config);
   assertOperatorForColumn(clause.operator, column, field.label);
@@ -254,6 +262,7 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
     return sql`not exists (
       select 1 from item_field_index ifi
       where ifi.item_id = ${itemRef}.id
+        and ifi.workspace_id = ${ctx.workspaceId}::uuid
         and ifi.field_id = ${field.id}
         and ${indexColumn(column)} is not null
     )`;
@@ -261,7 +270,7 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
 
   const predicate = valuePredicate(clause.operator, column, clause.value);
   if (predicate === null) {
-    throw new AppError('VALIDATION_FAILED', `Unsupported filter on "${field.label}".`);
+    throw new AppError('VALIDATION_ERROR', `Unsupported filter on "${field.label}".`);
   }
 
   // `not_contains`, `not_in`, and `has_none` must also match items with no
@@ -273,9 +282,14 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
     clause.operator === 'has_none' ||
     clause.operator === 'neq';
 
+  // `workspace_id` is redundant with the item join, but naming it lets the
+  // planner drive selective clauses from the (workspace_id, field_id, value)
+  // partial indexes as a semi-join instead of probing the PK per candidate
+  // row — the difference between hitting and missing the §6.1 budget.
   const exists = sql`exists (
     select 1 from item_field_index ifi
     where ifi.item_id = ${itemRef}.id
+      and ifi.workspace_id = ${ctx.workspaceId}::uuid
       and ifi.field_id = ${field.id}
       and ${predicate}
   )`;
@@ -285,6 +299,7 @@ function compileUserFieldClause(clause: FilterClause, ctx: CompileContext): SQL 
   return sql`(${exists} or not exists (
     select 1 from item_field_index ifi
     where ifi.item_id = ${itemRef}.id
+      and ifi.workspace_id = ${ctx.workspaceId}::uuid
       and ifi.field_id = ${field.id}
       and ${indexColumn(column)} is not null
   ))`;
@@ -294,7 +309,7 @@ function validateArity(clause: FilterClause): void {
   const { operator, value } = clause;
   if (NULLARY_OPERATORS.has(operator)) return;
   if (value === undefined || value === null) {
-    throw new AppError('VALIDATION_FAILED', `"${operator.replace(/_/g, ' ')}" needs a value.`);
+    throw new AppError('VALIDATION_ERROR', `"${operator.replace(/_/g, ' ')}" needs a value.`);
   }
   if (BINARY_OPERATORS.has(operator)) asPair(value, operator);
   if (LIST_OPERATORS.has(operator)) asList(value, operator);
@@ -330,8 +345,8 @@ function compileSystemClause(clause: FilterClause, ctx: CompileContext): SQL {
 
     case '$is_variant':
       return op === 'is_true'
-        ? sql`${itemRef}.variant_of_id is not null`
-        : sql`${itemRef}.variant_of_id is null`;
+        ? sql`${itemRef}.variant_parent_id is not null`
+        : sql`${itemRef}.variant_parent_id is null`;
 
     case '$has_invalid_values':
       return op === 'is_true'
@@ -365,7 +380,7 @@ function compileSystemClause(clause: FilterClause, ctx: CompileContext): SQL {
     }
 
     default:
-      throw new AppError('VALIDATION_FAILED', `Unknown system field "${clause.field}".`);
+      throw new AppError('VALIDATION_ERROR', `Unknown system field "${clause.field}".`);
   }
 }
 
@@ -392,7 +407,7 @@ function compileTextColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
     case 'is_not_empty':
       return sql`(${col} is not null and ${col} <> '')`;
     default:
-      throw new AppError('VALIDATION_FAILED', `"${op}" cannot be used on a text column.`);
+      throw new AppError('VALIDATION_ERROR', `"${op}" cannot be used on a text column.`);
   }
 }
 
@@ -419,27 +434,27 @@ function compileNumberColumn(col: SQL, op: FilterOperator, value: unknown): SQL 
     case 'is_not_empty':
       return sql`${col} is not null`;
     default:
-      throw new AppError('VALIDATION_FAILED', `"${op}" cannot be used on a number column.`);
+      throw new AppError('VALIDATION_ERROR', `"${op}" cannot be used on a number column.`);
   }
 }
 
 function compileDateColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
   switch (op) {
     case 'eq':
-      return sql`${col}::date = ${asDate(value, op)}::date`;
+      return sql`${col}::date = ${asDate(value, op)}::timestamptz::date`;
     case 'neq':
-      return sql`${col}::date <> ${asDate(value, op)}::date`;
+      return sql`${col}::date <> ${asDate(value, op)}::timestamptz::date`;
     case 'before':
-      return sql`${col} < ${asDate(value, op)}`;
+      return sql`${col} < ${asDate(value, op)}::timestamptz`;
     case 'after':
-      return sql`${col} > ${asDate(value, op)}`;
+      return sql`${col} > ${asDate(value, op)}::timestamptz`;
     case 'on_or_before':
-      return sql`${col} <= ${asDate(value, op)}`;
+      return sql`${col} <= ${asDate(value, op)}::timestamptz`;
     case 'on_or_after':
-      return sql`${col} >= ${asDate(value, op)}`;
+      return sql`${col} >= ${asDate(value, op)}::timestamptz`;
     case 'between': {
       const [low, high] = asPair(value, op);
-      return sql`${col} between ${asDate(low, op)} and ${asDate(high, op)}`;
+      return sql`${col} between ${asDate(low, op)}::timestamptz and ${asDate(high, op)}::timestamptz`;
     }
     case 'in_last_days':
       return sql`${col} >= now() - make_interval(days => ${asNumber(value, op)}) and ${col} <= now()`;
@@ -450,7 +465,7 @@ function compileDateColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
     case 'is_not_empty':
       return sql`${col} is not null`;
     default:
-      throw new AppError('VALIDATION_FAILED', `"${op}" cannot be used on a date column.`);
+      throw new AppError('VALIDATION_ERROR', `"${op}" cannot be used on a date column.`);
   }
 }
 
@@ -469,12 +484,31 @@ function compileUuidColumn(col: SQL, op: FilterOperator, value: unknown): SQL {
     case 'is_not_empty':
       return sql`${col} is not null`;
     default:
-      throw new AppError('VALIDATION_FAILED', `"${op}" cannot be used on this column.`);
+      throw new AppError('VALIDATION_ERROR', `"${op}" cannot be used on this column.`);
   }
 }
 
-const MAX_FILTER_DEPTH = 8;
-const MAX_CLAUSES = 100;
+/** API Design §4.1 limits. Beyond either, 422 FILTER_TOO_COMPLEX. */
+const MAX_FILTER_DEPTH = 4;
+const MAX_CLAUSES = 20;
+
+/**
+ * A clause on a non-indexed field is a 400, never a slow success (§4.1): a
+ * filter that quietly takes eight seconds trains users to distrust the
+ * product, and the error's `details.action` is a one-click fix that indexes
+ * the field via an opt-in backfill instead of an inline table scan.
+ */
+function assertFilterable(field: Field): void {
+  if (field.isIndexed) return;
+  throw new AppError(
+    'FIELD_NOT_FILTERABLE',
+    `"${field.label}" is not indexed for filtering.`,
+    {
+      fieldKey: field.key,
+      action: `PATCH /fields/${field.id} with is_indexed: true`,
+    },
+  );
+}
 
 /** Compiles a filter tree. Returns `null` for an empty filter (match all). */
 export function compileFilter(
@@ -486,11 +520,15 @@ export function compileFilter(
 
   function walk(group: FilterGroup, depth: number): SQL | null {
     if (depth > MAX_FILTER_DEPTH) {
-      throw new AppError('VALIDATION_FAILED', 'This filter is nested too deeply.');
+      throw new AppError(
+        'FILTER_TOO_COMPLEX',
+        `Filters can nest at most ${MAX_FILTER_DEPTH} levels deep.`,
+        { maxDepth: MAX_FILTER_DEPTH },
+      );
     }
 
     const parts: SQL[] = [];
-    for (const node of group.clauses) {
+    for (const node of group.children) {
       if (isFilterGroup(node)) {
         const nested = walk(node, depth + 1);
         if (nested) parts.push(sql`(${nested})`);
@@ -499,7 +537,9 @@ export function compileFilter(
 
       clauseCount += 1;
       if (clauseCount > MAX_CLAUSES) {
-        throw new AppError('VALIDATION_FAILED', `A filter may have at most ${MAX_CLAUSES} rules.`);
+        throw new AppError('FILTER_TOO_COMPLEX', `A filter may have at most ${MAX_CLAUSES} rules.`, {
+          maxClauses: MAX_CLAUSES,
+        });
       }
 
       parts.push(
@@ -510,7 +550,7 @@ export function compileFilter(
     }
 
     if (parts.length === 0) return null;
-    const joiner = group.operator === 'or' ? sql` or ` : sql` and `;
+    const joiner = group.op === 'or' ? sql` or ` : sql` and `;
     return sql.join(parts, joiner);
   }
 
@@ -524,23 +564,26 @@ export interface SortTerm {
   direction: 'asc' | 'desc';
   nullsFirst: boolean;
   valueType: IndexColumn;
+  /** Set for user fields: the projection join `renderSortJoins` must emit. */
+  join?: { alias: string; fieldId: string };
 }
 
 /**
  * Builds the ORDER BY terms.
  *
- * User fields sort through a correlated scalar subquery rather than a join, so
- * a multi-field sort does not multiply rows. The terms are returned structured
- * rather than pre-rendered because keyset pagination needs the same
- * expressions to build its cursor predicate — rendering them twice from two
- * code paths is how a sort and its cursor drift out of agreement and pages
- * start repeating rows.
+ * User fields sort through a LEFT JOIN on the projection's `(item_id,
+ * field_id)` primary key — at most one row per item, so rows never multiply,
+ * and the join hashes once instead of running a correlated subquery per
+ * surviving row (which is what blew the §6.1 filtered-page budget at 100k).
+ * Callers must place `renderSortJoins(terms)` in their FROM clause. The
+ * terms are returned structured because keyset pagination needs the same
+ * expressions for its cursor predicate — rendering them from two code paths
+ * is how a sort and its cursor drift and pages start repeating rows.
  */
 export function buildSortTerms(
   sorts: readonly SortSpec[] | undefined,
   ctx: CompileContext,
 ): SortTerm[] {
-  const itemRef = sql.identifier(ctx.alias ?? 'items');
   const terms: SortTerm[] = [];
 
   for (const spec of sorts ?? []) {
@@ -560,28 +603,41 @@ export function buildSortTerms(
 
     const field = ctx.fieldsByKey.get(spec.field);
     if (!field) {
-      throw new AppError('VALIDATION_FAILED', `Cannot sort by "${spec.field}" — no such field.`);
+      throw new AppError('VALIDATION_ERROR', `Cannot sort by "${spec.field}" — no such field.`);
     }
+    assertFilterable(field);
     const column = indexColumnFor(field.type, field.config);
     if (column === 'text_array') {
       throw new AppError(
-        'VALIDATION_FAILED',
+        'VALIDATION_ERROR',
         `"${field.label}" holds several values per item, so it can be grouped but not sorted.`,
       );
     }
+    const alias = `sort_${terms.length}`;
     terms.push({
       field: spec.field,
-      expr: sql`(
-        select ${indexColumn(column)} from item_field_index ifi
-        where ifi.item_id = ${itemRef}.id and ifi.field_id = ${field.id}
-      )`,
+      expr: sql`${sql.identifier(alias)}.${sql.identifier(VALUE_COLUMN[column])}`,
       direction,
       nullsFirst,
       valueType: column,
+      join: { alias, fieldId: field.id },
     });
   }
 
   return terms;
+}
+
+/** The LEFT JOINs backing user-field sort terms — goes in the FROM clause. */
+export function renderSortJoins(terms: readonly SortTerm[], ctx: CompileContext): SQL {
+  const itemRef = sql.identifier(ctx.alias ?? 'items');
+  const joins = terms
+    .filter((t): t is SortTerm & { join: NonNullable<SortTerm['join']> } => Boolean(t.join))
+    .map(
+      (t) => sql` left join item_field_index ${sql.identifier(t.join.alias)}
+        on ${sql.identifier(t.join.alias)}.item_id = ${itemRef}.id
+       and ${sql.identifier(t.join.alias)}.field_id = ${t.join.fieldId}`,
+    );
+  return joins.length ? sql.join(joins, sql` `) : sql``;
 }
 
 export function renderSortTerms(terms: readonly SortTerm[], ctx: CompileContext): SQL {
@@ -628,7 +684,7 @@ function systemSortColumn(field: string, ctx: CompileContext): SQL {
     case '$path':
       return sql`${itemRef}.path`;
     default:
-      throw new AppError('VALIDATION_FAILED', `Cannot sort by "${field}".`);
+      throw new AppError('VALIDATION_ERROR', `Cannot sort by "${field}".`);
   }
 }
 
@@ -640,7 +696,7 @@ export function referencedFieldKeys(
   const keys = new Set<string>();
 
   function walk(group: FilterGroup): void {
-    for (const node of group.clauses) {
+    for (const node of group.children) {
       if (isFilterGroup(node)) walk(node);
       else if (!isSystemFieldKey(node.field)) keys.add(node.field);
     }

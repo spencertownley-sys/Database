@@ -79,7 +79,7 @@ async function findDivergences(): Promise<Divergence[]> {
         effectiveValues: items.effectiveValues,
       })
       .from(items)
-      .where(and(eq(items.workspaceId, workspaceId), isNull(items.deletedAt)));
+      .where(and(eq(items.workspaceId, workspaceId), isNull(items.archivedAt)));
 
     // What the index *should* contain, keyed by (item, field).
     const expected = new Map<string, string>();
@@ -174,7 +174,7 @@ async function someItemIds(limit: number): Promise<string[]> {
     const rows = await tx
       .select({ id: items.id })
       .from(items)
-      .where(and(eq(items.workspaceId, workspaceId), isNull(items.deletedAt)))
+      .where(and(eq(items.workspaceId, workspaceId), isNull(items.archivedAt)))
       .orderBy(items.id)
       .limit(limit);
     return rows.map((r) => r.id);
@@ -246,7 +246,7 @@ describe('item_field_index stays derivable from effective_values', () => {
           and(
             eq(items.workspaceId, workspaceId),
             eq(items.isVariantModel, true),
-            isNull(items.deletedAt),
+            isNull(items.archivedAt),
           ),
         )
         .limit(1);

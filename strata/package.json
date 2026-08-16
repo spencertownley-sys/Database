@@ -20,7 +20,7 @@
     "test:watch": "vitest",
     "test:unit": "vitest run tests/unit tests/property",
     "test:integration": "vitest run tests/integration",
-    "test:perf": "vitest run tests/perf",
+    "test:perf": "PERF=1 vitest run tests/perf",
     "test:e2e": "playwright test"
   },
   "dependencies": {

@@ -94,7 +94,7 @@ function GridHeaderImpl(props: GridHeaderProps) {
               title={`Sort by ${column.field.label}`}
             >
               <span className="truncate">{column.field.label}</span>
-              {column.field.required && (
+              {column.field.requiredForCompleteness && (
                 <span aria-label="required" className="text-[var(--color-danger)]">
                   *
                 </span>

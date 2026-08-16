@@ -27,14 +27,14 @@ export const filterClauseSchema: z.ZodType<{
 });
 
 export interface FilterGroupInput {
-  operator: 'and' | 'or';
-  clauses: Array<z.infer<typeof filterClauseSchema> | FilterGroupInput>;
+  op: 'and' | 'or';
+  children: Array<z.infer<typeof filterClauseSchema> | FilterGroupInput>;
 }
 
 export const filterGroupSchema: z.ZodType<FilterGroupInput> = z.lazy(() =>
   z.object({
-    operator: z.enum(['and', 'or']),
-    clauses: z.array(z.union([filterClauseSchema, filterGroupSchema])).max(100),
+    op: z.enum(['and', 'or']),
+    children: z.array(z.union([filterClauseSchema, filterGroupSchema])).max(100),
   }),
 );
 
@@ -64,20 +64,64 @@ const jsonParam = <S extends z.ZodTypeAny>(schema: S) =>
     })
     .pipe(schema);
 
+/** `z.coerce.boolean()` treats "false" as true; query flags need the real thing. */
+const boolParam = z
+  .enum(['true', 'false', '1', '0'])
+  .transform((v) => v === 'true' || v === '1');
+
+/**
+ * The API Design §4 sort grammar: `field_key:asc,other_key:desc`. Direction
+ * defaults to `asc`. Max 3 keys (§4) — beyond that the keyset cursor stops
+ * paying for itself.
+ */
+export const sortParamSchema = z
+  .string()
+  .max(300)
+  .transform((raw, ctx) => {
+    const specs = raw
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const [field, direction = 'asc'] = part.split(':');
+        return { field: field ?? '', direction };
+      });
+    for (const spec of specs) {
+      if (!spec.field || (spec.direction !== 'asc' && spec.direction !== 'desc')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Sort must look like "field_key:asc,other_key:desc" — got "${raw}".`,
+        });
+        return z.NEVER;
+      }
+    }
+    if (specs.length > 3) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'At most 3 sort keys.' });
+      return z.NEVER;
+    }
+    return specs as Array<{ field: string; direction: 'asc' | 'desc' }>;
+  });
+
+/** Query params per API Design §4 (post-`fromWire`, so camelCase here). */
 export const listItemsQuerySchema = z.object({
-  workspace: z.string().optional(),
-  itemType: uuidSchema.optional(),
+  itemTypeId: uuidSchema.optional(),
+  viewId: uuidSchema.optional(),
   filter: jsonParam(filterGroupSchema).optional(),
-  sort: jsonParam(z.array(sortSchema).max(8)).optional(),
-  search: z.string().max(200).optional(),
-  under: uuidSchema.optional(),
-  treeNode: uuidSchema.optional(),
-  treeIncludeDescendants: z.coerce.boolean().optional(),
-  incompleteOnly: z.coerce.boolean().optional(),
-  includeVariants: z.coerce.boolean().optional(),
+  sort: sortParamSchema.optional(),
+  /** Comma-separated field keys to include in the value bags. */
+  fields: z.string().max(2000).optional(),
+  /** Comma-separated expansions: `item_type`. */
+  expand: z.string().max(200).optional(),
+  q: z.string().max(200).optional(),
+  parentId: uuidSchema.optional(),
+  inSubtree: uuidSchema.optional(),
+  treeNodeId: uuidSchema.optional(),
+  includeDescendants: boolParam.optional(),
+  variantParentId: uuidSchema.optional(),
+  includeVariants: boolParam.optional(),
+  incompleteOnly: boolParam.optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
   cursor: z.string().max(4000).optional(),
-  withTotal: z.coerce.boolean().optional(),
 });
 
 export const itemDraftSchema = z.object({
@@ -90,7 +134,7 @@ export const itemDraftSchema = z.object({
 
 export const changeTargetSchema = z.object({
   kind: z.enum(['ids', 'filter', 'subtree', 'new']),
-  itemIds: z.array(uuidSchema).max(50_000).optional(),
+  itemIds: z.array(uuidSchema).max(10_000).optional(),
   filter: filterGroupSchema.optional(),
   rootItemId: uuidSchema.optional(),
   includeDescendants: z.boolean().optional(),
@@ -107,8 +151,9 @@ export const changeSetInputSchema = z.object({
 });
 
 export const createItemTypeSchema = z.object({
-  name: z.string().min(1).max(120),
-  presetKey: z.string().max(60).optional(),
+  label: z.string().min(1).max(120),
+  /** A starter preset key (§3): task, client_project, campaign, … */
+  preset: z.string().max(60).optional(),
   key: z
     .string()
     .regex(/^[a-z][a-z0-9_]{0,62}$/, 'Use lowercase letters, digits and underscores.')
@@ -127,12 +172,12 @@ export const createFieldSchema = z.object({
     .optional(),
   type: z.enum(FIELD_TYPES),
   config: z.record(z.unknown()).default({}),
-  required: z.boolean().default(false),
-  inheritance: z.enum(['shared', 'variant']).default('shared'),
+  requiredForCompleteness: z.boolean().default(false),
+  inheritance: z.enum(['shared', 'variant']).default('variant'),
   helpText: z.string().max(500).optional(),
   fieldGroupId: uuidSchema.nullable().optional(),
   defaultValue: z.unknown().optional(),
-  countsTowardCompleteness: z.boolean().default(true),
+  isIndexed: z.boolean().optional(),
   isSearchable: z.boolean().default(false),
   /**
    * Required when adding a required field to a type that already has items:

@@ -38,6 +38,8 @@ export const updatedAt = () =>
     .default(sql`now()`);
 
 export const deletedAt = () => timestamp('deleted_at', { withTimezone: true, mode: 'date' });
+/** Soft delete under the spec's name for items and item types (Tech Spec §2.2–2.3). */
+export const archivedAt = () => timestamp('archived_at', { withTimezone: true, mode: 'date' });
 
 export const timestamps = () => ({
   createdAt: createdAt(),

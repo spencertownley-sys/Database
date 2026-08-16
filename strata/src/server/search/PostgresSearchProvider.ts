@@ -24,6 +24,7 @@ import type { FilterGroup, GroupSpec } from '@/types/filters';
 import { isSystemFieldKey } from '@/types/filters';
 import {
   buildSortTerms,
+  renderSortJoins,
   compileFilter,
   renderSortTerms,
   type CompileContext,
@@ -74,7 +75,7 @@ function decodeCursor(cursor: string): CursorPayload {
     if (!Array.isArray(parsed.v) || typeof parsed.id !== 'string') throw new Error('shape');
     return parsed;
   } catch {
-    throw new AppError('VALIDATION_FAILED', 'That page cursor is not valid. Start from page one.');
+    throw new AppError('VALIDATION_ERROR', 'That page cursor is not valid. Start from page one.');
   }
 }
 
@@ -192,7 +193,7 @@ function buildWhere(
   const itemRef = sql.identifier(ITEM_ALIAS);
   const parts: SQL[] = [
     sql`${itemRef}.workspace_id = ${workspaceId}::uuid`,
-    sql`${itemRef}.deleted_at is null`,
+    sql`${itemRef}.archived_at is null`,
   ];
 
   if (query.itemTypeId) {
@@ -201,7 +202,7 @@ function buildWhere(
 
   if (!query.includeVariants) {
     // Variants are shown nested under their model, not as loose grid rows.
-    parts.push(sql`${itemRef}.variant_of_id is null`);
+    parts.push(sql`${itemRef}.variant_parent_id is null`);
   }
 
   if (query.incompleteOnly) {
@@ -212,6 +213,14 @@ function buildWhere(
     parts.push(sql`${itemRef}.path <@ (
       select path from items where id = ${query.underItemId}::uuid
     )`);
+  }
+
+  if (query.parentId) {
+    parts.push(sql`${itemRef}.parent_id = ${query.parentId}::uuid`);
+  }
+
+  if (query.variantParentId) {
+    parts.push(sql`${itemRef}.variant_parent_id = ${query.variantParentId}::uuid`);
   }
 
   if (query.treeNodeId) {
@@ -229,6 +238,27 @@ function buildWhere(
               and itn.tree_node_id = ${query.treeNodeId}::uuid
           )`,
     );
+  }
+
+  if (query.guestScopes) {
+    // A guest's whole result set is scoped, not post-filtered: an item is
+    // visible only when one of its tree nodes sits inside a granted branch.
+    // Fail closed — an empty grant list matches nothing.
+    if (query.guestScopes.length === 0) {
+      parts.push(sql`false`);
+    } else {
+      const branches = query.guestScopes.map((scope) =>
+        scope.includeDescendants
+          ? sql`tn.path <@ ${scope.treeNodePath}::ltree`
+          : sql`tn.path = ${scope.treeNodePath}::ltree`,
+      );
+      parts.push(sql`exists (
+        select 1 from item_tree_nodes itn
+        join tree_nodes tn on tn.id = itn.tree_node_id
+        where itn.item_id = ${itemRef}.id
+          and (${sql.join(branches, sql` or `)})
+      )`);
+    }
   }
 
   if (query.search && query.search.trim()) {
@@ -254,9 +284,10 @@ const SELECT_COLUMNS = sql`
   ${sql.identifier(ITEM_ALIAS)}.title,
   ${sql.identifier(ITEM_ALIAS)}.parent_id as "parentId",
   ${sql.identifier(ITEM_ALIAS)}.path::text as path,
-  ${sql.identifier(ITEM_ALIAS)}.order_key as "orderKey",
+  ${sql.identifier(ITEM_ALIAS)}.depth,
+  ${sql.identifier(ITEM_ALIAS)}.position as "position",
   ${sql.identifier(ITEM_ALIAS)}.is_variant_model as "isVariantModel",
-  ${sql.identifier(ITEM_ALIAS)}.variant_of_id as "variantOfId",
+  ${sql.identifier(ITEM_ALIAS)}.variant_parent_id as "variantParentId",
   ${sql.identifier(ITEM_ALIAS)}.variant_axis_values as "variantAxisValues",
   ${sql.identifier(ITEM_ALIAS)}.values,
   ${sql.identifier(ITEM_ALIAS)}.effective_values as "effectiveValues",
@@ -269,12 +300,15 @@ const SELECT_COLUMNS = sql`
   ${sql.identifier(ITEM_ALIAS)}.updated_by as "updatedBy",
   ${sql.identifier(ITEM_ALIAS)}.created_at as "createdAt",
   ${sql.identifier(ITEM_ALIAS)}.updated_at as "updatedAt",
-  ${sql.identifier(ITEM_ALIAS)}.deleted_at as "deletedAt"
+  ${sql.identifier(ITEM_ALIAS)}.archived_at as "archivedAt"
 `;
 
 // ---------------------------------------------------------------------------
 // provider
 // ---------------------------------------------------------------------------
+
+/** Above this, `total` is reported as `null` (API Design §1.2). */
+export const TOTAL_COUNT_CAP = 10_000;
 
 export class PostgresSearchProvider implements SearchProvider {
   async search(
@@ -294,13 +328,20 @@ export class PostgresSearchProvider implements SearchProvider {
     // One extra row decides whether there is a next page, without a count.
     const rows = await tx.execute(sql`
       select ${SELECT_COLUMNS}
-      from items ${sql.identifier(ITEM_ALIAS)}
+      from items ${sql.identifier(ITEM_ALIAS)}${renderSortJoins(terms, ctx)}
       where ${where}${keyset ? sql` and ${keyset}` : sql``}
       order by ${renderSortTerms(terms, ctx)}
       limit ${limit + 1}
     `);
 
-    const list = [...rows] as unknown as Item[];
+    // Raw `tx.execute` rows carry timestamps as Postgres strings; the wire
+    // contract is RFC 3339, which `toWire` produces from Date instances.
+    const list = ([...rows] as unknown as Item[]).map((item) => ({
+      ...item,
+      createdAt: new Date(item.createdAt),
+      updatedAt: new Date(item.updatedAt),
+      deletedAt: item.archivedAt ? new Date(item.archivedAt) : null,
+    }));
     const hasMore = list.length > limit;
     const page = hasMore ? list.slice(0, limit) : list;
 
@@ -319,12 +360,17 @@ export class PostgresSearchProvider implements SearchProvider {
     workspaceId: string,
     fields: readonly Field[],
     query: Omit<SearchQuery, 'limit' | 'cursor'>,
-  ): Promise<number> {
+  ): Promise<number | null> {
     const where = buildWhere(workspaceId, fields, query);
+    // Bounded: past 10,000 an exact count reads rows nobody will page through,
+    // and the API contract (§1.2) returns `total: null` instead.
     const rows = await tx.execute(sql`
-      select count(*)::int as n from items ${sql.identifier(ITEM_ALIAS)} where ${where}
+      select count(*)::int as n from (
+        select 1 from items ${sql.identifier(ITEM_ALIAS)} where ${where} limit ${TOTAL_COUNT_CAP + 1}
+      ) bounded
     `);
-    return Number(([...rows][0] as { n: number } | undefined)?.n ?? 0);
+    const n = Number(([...rows][0] as { n: number } | undefined)?.n ?? 0);
+    return n > TOTAL_COUNT_CAP ? null : n;
   }
 
   /**
@@ -355,19 +401,19 @@ export class PostgresSearchProvider implements SearchProvider {
           groupExpr = sql`${itemRef}.parent_id::text`;
           break;
         default:
-          throw new AppError('VALIDATION_FAILED', `Cannot group by "${group.field}".`);
+          throw new AppError('VALIDATION_ERROR', `Cannot group by "${group.field}".`);
       }
     } else {
       const field = fields.find((f) => f.key === group.field);
       if (!field) {
-        throw new AppError('VALIDATION_FAILED', `Cannot group by "${group.field}" — no such field.`);
+        throw new AppError('VALIDATION_ERROR', `Cannot group by "${group.field}" — no such field.`);
       }
       const column = indexColumnFor(field.type, field.config);
       if (column === 'text_array') {
         // A multi-select item belongs to several buckets at once; the grid
         // treats that as unsupported rather than silently duplicating rows.
         throw new AppError(
-          'VALIDATION_FAILED',
+          'VALIDATION_ERROR',
           `"${field.label}" allows several values per item, so it cannot group rows.`,
         );
       }
@@ -441,7 +487,7 @@ export class PostgresSearchProvider implements SearchProvider {
     const ids = ([...rows] as Array<{ id: string }>).map((r) => r.id);
     if (ids.length > max) {
       throw new AppError(
-        'BULK_LIMIT_EXCEEDED',
+        'TARGET_TOO_LARGE',
         `That filter matches more than ${max.toLocaleString()} items. Narrow it before applying a change.`,
         { limit: max },
       );
@@ -468,6 +514,33 @@ function columnName(column: string): string {
 }
 
 export const searchProvider: SearchProvider = new PostgresSearchProvider();
+
+/**
+ * `EXPLAIN (FORMAT JSON)` for exactly the SQL `search()` would run — used by
+ * the perf suite to fail the build when a plan seq-scans `items`. Kept here so
+ * it cannot drift from the real query assembly.
+ */
+export async function explainSearch(
+  tx: Tx,
+  workspaceId: string,
+  fields: readonly Field[],
+  query: SearchQuery,
+): Promise<unknown> {
+  const ctx = contextFor(workspaceId, fields, query.itemTypeId);
+  const terms = buildSortTerms(query.sort, ctx);
+  const where = buildWhere(workspaceId, fields, query);
+  const limit = Math.min(Math.max(query.limit, 1), 500);
+
+  const rows = await tx.execute(sql`
+    explain (format json)
+    select ${SELECT_COLUMNS}
+    from items ${sql.identifier(ITEM_ALIAS)}${renderSortJoins(terms, ctx)}
+    where ${where}
+    order by ${renderSortTerms(terms, ctx)}
+    limit ${limit + 1}
+  `);
+  return ([...rows][0] as Record<string, unknown>)['QUERY PLAN'];
+}
 
 /**
  * Resolves a filter-targeted change set to concrete ids.

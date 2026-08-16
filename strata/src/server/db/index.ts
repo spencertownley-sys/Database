@@ -82,7 +82,7 @@ export async function withoutWorkspace<T>(fn: (tx: Tx) => Promise<T>): Promise<T
 
 function assertWorkspaceId(workspaceId: string): void {
   if (!UUID_RE.test(workspaceId)) {
-    throw new AppError('INTERNAL', 'withWorkspace() requires a uuid workspace id.');
+    throw new AppError('INTERNAL_ERROR', 'withWorkspace() requires a uuid workspace id.');
   }
 }
 

@@ -21,11 +21,10 @@ export interface PresetField {
   label: string;
   type: FieldType;
   config?: FieldConfig;
-  required?: boolean;
+  requiredForCompleteness?: boolean;
   inheritance?: InheritanceMode;
   isIndexed?: boolean;
   isSearchable?: boolean;
-  countsTowardCompleteness?: boolean;
   helpText?: string;
   defaultValue?: unknown;
   /** Field group key; fields without one land in the default group. */
@@ -40,8 +39,8 @@ export interface PresetGroup {
 
 export interface ItemTypePreset {
   key: string;
-  name: string;
-  pluralName: string;
+  label: string;
+  pluralLabel: string;
   description: string;
   icon: string;
   color: string;
@@ -74,8 +73,8 @@ const PRIORITY_OPTIONS = options(
 
 const task: ItemTypePreset = {
   key: 'task',
-  name: 'Task',
-  pluralName: 'Tasks',
+  label: 'Task',
+  pluralLabel: 'Tasks',
   description: 'A single piece of work with an owner and a due date.',
   icon: 'check-square',
   color: 'blue',
@@ -91,7 +90,7 @@ const task: ItemTypePreset = {
       label: 'Status',
       type: 'select',
       config: { options: STATUS_OPTIONS },
-      required: true,
+      requiredForCompleteness: true,
       defaultValue: 'todo',
       isIndexed: true,
       group: 'details',
@@ -112,7 +111,6 @@ const task: ItemTypePreset = {
       label: 'Estimate (hours)',
       type: 'number',
       config: { min: 0, precision: 1, unit: 'h' },
-      countsTowardCompleteness: false,
       group: 'planning',
     },
     {
@@ -120,7 +118,6 @@ const task: ItemTypePreset = {
       label: 'Notes',
       type: 'long_text',
       isSearchable: true,
-      countsTowardCompleteness: false,
       group: 'details',
     },
   ],
@@ -128,8 +125,8 @@ const task: ItemTypePreset = {
 
 const clientProject: ItemTypePreset = {
   key: 'client_project',
-  name: 'Client project',
-  pluralName: 'Client projects',
+  label: 'Client project',
+  pluralLabel: 'Client projects',
   description: 'A named engagement with a client, a budget, and a delivery window.',
   icon: 'briefcase',
   color: 'violet',
@@ -141,8 +138,8 @@ const clientProject: ItemTypePreset = {
     { key: 'delivery', label: 'Delivery' },
   ],
   fields: [
-    { key: 'client_name', label: 'Client', type: 'text', required: true, isSearchable: true, isIndexed: true, group: 'client' },
-    { key: 'account_lead', label: 'Account lead', type: 'user', isIndexed: true, group: 'client' },
+    { key: 'client_name', label: 'Client', type: 'text', requiredForCompleteness: true, isSearchable: true, isIndexed: true, group: 'client' },
+    { key: 'account_lead', label: 'Owner', type: 'user', isIndexed: true, group: 'client' },
     {
       key: 'status',
       label: 'Status',
@@ -156,7 +153,7 @@ const clientProject: ItemTypePreset = {
           ['closed', 'Closed', 'slate'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       defaultValue: 'scoping',
       isIndexed: true,
       group: 'delivery',
@@ -174,25 +171,25 @@ const clientProject: ItemTypePreset = {
       label: 'Blended rate',
       type: 'currency',
       config: { currencyCode: 'USD', min: 0 },
-      countsTowardCompleteness: false,
       group: 'commercial',
     },
-    { key: 'start_date', label: 'Start date', type: 'date', required: true, isIndexed: true, group: 'delivery' },
-    { key: 'end_date', label: 'End date', type: 'date', isIndexed: true, group: 'delivery' },
-    { key: 'brief_url', label: 'Brief', type: 'url', countsTowardCompleteness: false, group: 'client' },
+    { key: 'start_date', label: 'Start date', type: 'date', requiredForCompleteness: true, isIndexed: true, group: 'delivery' },
+    { key: 'end_date', label: 'Due date', type: 'date', isIndexed: true, group: 'delivery' },
+    { key: 'brief_url', label: 'Brief', type: 'url', group: 'client' },
     { key: 'scope', label: 'Scope of work', type: 'long_text', isSearchable: true, group: 'client' },
   ],
 };
 
 const campaign: ItemTypePreset = {
   key: 'campaign',
-  name: 'Campaign',
-  pluralName: 'Campaigns',
+  label: 'Campaign',
+  pluralLabel: 'Campaigns',
   description: 'A marketing push across channels, with a window and a budget.',
   icon: 'megaphone',
   color: 'amber',
   conceptHint:
     'Campaigns usually own a tree of deliverables — one per channel, per region, per format. Nest them rather than flattening the names.',
+  variantAxes: ['region'],
   groups: [
     { key: 'plan', label: 'Plan' },
     { key: 'targeting', label: 'Targeting' },
@@ -212,7 +209,7 @@ const campaign: ItemTypePreset = {
           ['complete', 'Complete', 'violet'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       defaultValue: 'draft',
       isIndexed: true,
       group: 'plan',
@@ -232,18 +229,35 @@ const campaign: ItemTypePreset = {
           ['pr', 'PR'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       isIndexed: true,
       group: 'plan',
     },
-    { key: 'owner', label: 'Owner', type: 'user', required: true, isIndexed: true, group: 'plan' },
-    { key: 'launch_date', label: 'Launch date', type: 'date', required: true, isIndexed: true, group: 'plan' },
-    { key: 'end_date', label: 'End date', type: 'date', isIndexed: true, group: 'plan' },
+    { key: 'owner', label: 'Owner', type: 'user', requiredForCompleteness: true, isIndexed: true, group: 'plan' },
+    { key: 'launch_date', label: 'Launch date', type: 'date', requiredForCompleteness: true, isIndexed: true, group: 'plan' },
+    { key: 'end_date', label: 'Due date', type: 'date', isIndexed: true, group: 'plan' },
     {
       key: 'budget',
       label: 'Budget',
       type: 'currency',
       config: { currencyCode: 'USD', min: 0 },
+      isIndexed: true,
+      group: 'plan',
+    },
+    {
+      // The declared variant axis (§3.2) — without this field, generating
+      // per-region variants of a campaign has nothing to expand over.
+      key: 'region',
+      label: 'Region',
+      type: 'select',
+      config: {
+        options: options(
+          ['na', 'North America'],
+          ['emea', 'EMEA'],
+          ['apac', 'APAC'],
+          ['latam', 'LATAM'],
+        ),
+      },
       isIndexed: true,
       group: 'plan',
     },
@@ -254,14 +268,12 @@ const campaign: ItemTypePreset = {
       label: 'Goal impressions',
       type: 'number',
       config: { min: 0 },
-      countsTowardCompleteness: false,
       group: 'measurement',
     },
     {
       key: 'utm_verified',
       label: 'UTMs verified',
       type: 'checkbox',
-      countsTowardCompleteness: false,
       group: 'measurement',
     },
   ],
@@ -269,8 +281,8 @@ const campaign: ItemTypePreset = {
 
 const productVariant: ItemTypePreset = {
   key: 'product_variant',
-  name: 'Product',
-  pluralName: 'Products',
+  label: 'Product',
+  pluralLabel: 'Products',
   description: 'A product with per-region and per-size variants that inherit shared copy.',
   icon: 'package',
   color: 'emerald',
@@ -283,7 +295,34 @@ const productVariant: ItemTypePreset = {
   ],
   variantAxes: ['region', 'size'],
   fields: [
-    { key: 'sku', label: 'SKU', type: 'text', required: true, inheritance: 'variant', isIndexed: true, isSearchable: true, group: 'identity' },
+    { key: 'sku', label: 'SKU', type: 'text', requiredForCompleteness: true, inheritance: 'variant', isIndexed: true, isSearchable: true, group: 'identity' },
+    {
+      key: 'category',
+      label: 'Category',
+      type: 'select',
+      config: {
+        options: options(['apparel', 'Apparel'], ['footwear', 'Footwear'], ['accessories', 'Accessories']),
+      },
+      inheritance: 'shared',
+      isIndexed: true,
+      group: 'identity',
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      type: 'select',
+      config: {
+        options: options(
+          ['draft', 'Draft', 'slate'],
+          ['active', 'Active', 'green'],
+          ['discontinued', 'Discontinued', 'slate'],
+        ),
+      },
+      inheritance: 'variant',
+      defaultValue: 'draft',
+      isIndexed: true,
+      group: 'identity',
+    },
     {
       key: 'region',
       label: 'Region',
@@ -296,7 +335,7 @@ const productVariant: ItemTypePreset = {
           ['latam', 'LATAM'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       inheritance: 'variant',
       isIndexed: true,
       group: 'identity',
@@ -317,7 +356,7 @@ const productVariant: ItemTypePreset = {
       label: 'Price',
       type: 'currency',
       config: { currencyCode: 'USD', min: 0 },
-      required: true,
+      requiredForCompleteness: true,
       inheritance: 'variant',
       isIndexed: true,
       helpText: 'Set per variant — regional pricing rarely matches.',
@@ -329,21 +368,20 @@ const productVariant: ItemTypePreset = {
       type: 'number',
       config: { min: 0 },
       inheritance: 'variant',
-      countsTowardCompleteness: false,
       group: 'commercial',
     },
     {
       key: 'description',
       label: 'Description',
       type: 'long_text',
-      required: true,
+      requiredForCompleteness: true,
       inheritance: 'shared',
       isSearchable: true,
       helpText: 'Written once on the product; every variant inherits it.',
       group: 'content',
     },
     { key: 'material', label: 'Material', type: 'text', inheritance: 'shared', isSearchable: true, group: 'content' },
-    { key: 'care_instructions', label: 'Care instructions', type: 'long_text', inheritance: 'shared', countsTowardCompleteness: false, group: 'content' },
+    { key: 'care_instructions', label: 'Care instructions', type: 'long_text', inheritance: 'shared', group: 'content' },
     { key: 'hero_image', label: 'Hero image', type: 'url', inheritance: 'shared', group: 'content' },
     { key: 'launch_date', label: 'Launch date', type: 'date', inheritance: 'shared', isIndexed: true, group: 'commercial' },
   ],
@@ -351,8 +389,8 @@ const productVariant: ItemTypePreset = {
 
 const structuredRecord: ItemTypePreset = {
   key: 'structured_record',
-  name: 'Record',
-  pluralName: 'Records',
+  label: 'Record',
+  pluralLabel: 'Records',
   description: 'A general-purpose catalogued record with an owner, a category, and a status.',
   icon: 'file-text',
   color: 'slate',
@@ -363,10 +401,10 @@ const structuredRecord: ItemTypePreset = {
     { key: 'governance', label: 'Governance' },
   ],
   fields: [
-    { key: 'reference', label: 'Reference', type: 'text', required: true, isIndexed: true, isSearchable: true, group: 'summary' },
+    { key: 'reference', label: 'Reference ID', type: 'text', requiredForCompleteness: true, isIndexed: true, isSearchable: true, group: 'summary' },
     {
       key: 'category',
-      label: 'Category',
+      label: 'Record type',
       type: 'select',
       config: {
         options: options(
@@ -377,12 +415,12 @@ const structuredRecord: ItemTypePreset = {
           ['other', 'Other'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       isIndexed: true,
       group: 'summary',
     },
-    { key: 'summary', label: 'Summary', type: 'long_text', required: true, isSearchable: true, group: 'summary' },
-    { key: 'owner', label: 'Owner', type: 'user', required: true, isIndexed: true, group: 'governance' },
+    { key: 'summary', label: 'Summary', type: 'long_text', requiredForCompleteness: true, isSearchable: true, group: 'summary' },
+    { key: 'owner', label: 'Owner', type: 'user', requiredForCompleteness: true, isIndexed: true, group: 'governance' },
     {
       key: 'status',
       label: 'Status',
@@ -395,7 +433,7 @@ const structuredRecord: ItemTypePreset = {
           ['retired', 'Retired', 'slate'],
         ),
       },
-      required: true,
+      requiredForCompleteness: true,
       defaultValue: 'draft',
       isIndexed: true,
       group: 'governance',
@@ -409,40 +447,28 @@ const structuredRecord: ItemTypePreset = {
       config: {
         options: options(['confidential', 'Confidential'], ['external', 'External'], ['legal', 'Legal review']),
       },
-      countsTowardCompleteness: false,
       group: 'summary',
     },
-    { key: 'source_url', label: 'Source', type: 'url', countsTowardCompleteness: false, group: 'summary' },
-    { key: 'verified', label: 'Verified', type: 'checkbox', countsTowardCompleteness: false, group: 'governance' },
+    { key: 'source_url', label: 'Source', type: 'url', group: 'summary' },
+    { key: 'verified', label: 'Verified', type: 'checkbox', group: 'governance' },
   ],
 };
 
 /**
- * Blank is deliberately near-empty — it is the escape hatch for a shape none
- * of the others fit. It still ships with a status and notes, because an Item
- * Type whose only column is a title cannot be usefully opened in a grid.
+ * Blank is exactly what the card says: Title only (UI/UX §3.2). It is the
+ * escape hatch for a shape none of the others fit — shipping it with fields
+ * would mean every custom type starts by deleting somebody else's guesses.
  */
 const blank: ItemTypePreset = {
   key: 'blank',
-  name: 'Item',
-  pluralName: 'Items',
-  description: 'Start from almost nothing and add your own fields.',
+  label: 'Item',
+  pluralLabel: 'Items',
+  description: 'Start from a title and add your own fields.',
   icon: 'square',
   color: 'slate',
   conceptHint: 'Add fields as you discover you need them — renaming one never touches stored data.',
-  groups: [{ key: 'details', label: 'Details' }],
-  fields: [
-    {
-      key: 'status',
-      label: 'Status',
-      type: 'select',
-      config: { options: STATUS_OPTIONS },
-      defaultValue: 'todo',
-      isIndexed: true,
-      group: 'details',
-    },
-    { key: 'notes', label: 'Notes', type: 'long_text', isSearchable: true, countsTowardCompleteness: false, group: 'details' },
-  ],
+  groups: [],
+  fields: [],
 };
 
 export const ITEM_TYPE_PRESETS: ItemTypePreset[] = [

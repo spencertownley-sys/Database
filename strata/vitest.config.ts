@@ -13,6 +13,11 @@ export default defineConfig({
   test: {
     globals: true,
     setupFiles: ['./tests/setup.ts'],
+    // The perf suite seeds a 100k-item fixture; it runs via `npm run
+    // test:perf` (and in CI), not on every `npm test`.
+    exclude: process.env.PERF
+      ? ['**/node_modules/**']
+      : ['**/node_modules/**', 'tests/perf/**'],
     // Integration tests share one Postgres database and mutate global state
     // (RLS roles, seeded workspaces). Running files in parallel against a
     // single database produces flaky cross-test interference.

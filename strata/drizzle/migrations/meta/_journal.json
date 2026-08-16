@@ -36,6 +36,55 @@
       "when": 1786818562018,
       "tag": "0004_api_key_lookup",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786822172939,
+      "tag": "0005_variant_inheritance_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786822578517,
+      "tag": "0006_completeness_required_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786824050918,
+      "tag": "0007_spec_data_model_alignment",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786824582284,
+      "tag": "0008_always_indexed_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786834698840,
+      "tag": "0009_share_token_lookup",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786836787410,
+      "tag": "0010_title_keyset_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786866923512,
+      "tag": "0011_list_user_workspaces",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,8 @@ import { withWorkspace } from '@/server/db';
 import { getSessionUser } from '@/server/auth/session';
 import { resolveSessionContext } from '@/server/auth/middleware';
 import { Providers } from '@/app/providers';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { CommandPalette } from '@/components/CommandPalette';
 import { AppError } from '@/server/lib/errors';
 import { checkDatabaseReadiness } from '@/server/db/readiness';
 import { SetupHelp } from '@/components/SetupHelp';
@@ -62,10 +64,40 @@ export default async function WorkspaceLayout({
             {context.actor.role}
           </span>
           <span className="ml-auto text-xs text-[var(--color-ink-subtle)]">{user.email}</span>
+          <NotificationBell workspaceId={context.workspace.id} workspaceSlug={slug} />
         </header>
 
         <div className="flex min-h-0 flex-1">
           <nav className="w-56 shrink-0 overflow-y-auto border-r bg-[var(--color-surface)] p-2">
+            <p className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-ink-subtle)]">
+              Organize
+            </p>
+            <ul className="mb-2 space-y-0.5">
+              <li>
+                <Link
+                  href={`/w/${slug}/trees`}
+                  className="flex items-center rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
+                >
+                  Category trees
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href={`/w/${slug}/import`}
+                  className="flex items-center rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
+                >
+                  Import
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href={`/w/${slug}/activity`}
+                  className="flex items-center rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
+                >
+                  Activity
+                </Link>
+              </li>
+            </ul>
             <p className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-ink-subtle)]">
               Item types
             </p>
@@ -76,7 +108,7 @@ export default async function WorkspaceLayout({
                     href={`/w/${slug}/types/${type.id}`}
                     className="flex items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-[var(--color-muted)]"
                   >
-                    <span className="truncate">{type.pluralName ?? type.name}</span>
+                    <span className="truncate">{type.pluralLabel ?? type.label}</span>
                     <span className="tabular shrink-0 text-xs text-[var(--color-ink-subtle)]">
                       {type.itemCount}
                     </span>
@@ -88,6 +120,16 @@ export default async function WorkspaceLayout({
 
           <main className="min-w-0 flex-1">{children}</main>
         </div>
+
+        <CommandPalette
+          workspaceId={context.workspace.id}
+          workspaceSlug={slug}
+          itemTypes={itemTypes.map((t) => ({
+            id: t.id,
+            label: t.label,
+            pluralLabel: t.pluralLabel,
+          }))}
+        />
       </div>
     </Providers>
   );

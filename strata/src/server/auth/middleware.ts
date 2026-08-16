@@ -34,16 +34,22 @@ function bearerToken(request: Request): string | null {
   return value.trim();
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Resolves the caller for a `/api/v1` request.
  *
- * `slug` may be omitted when the key itself identifies the workspace — an API
- * key is minted against one workspace and cannot address another, so the key
- * is the stronger scoping signal and wins if both are present and disagree.
+ * `workspaceId` is the `X-Workspace-Id` header (API Design §1.1). It may be
+ * omitted only when an API key identifies the workspace — a key is minted
+ * against one workspace and cannot address another, so the key is the
+ * stronger scoping signal and wins if both are present and disagree. A
+ * session request without the header is rejected with `WORKSPACE_REQUIRED`:
+ * there is no default-workspace fallback, because an implicit tenant is how
+ * cross-tenant bugs happen.
  */
 export async function resolveRequestContext(
   request: Request,
-  slug: string | undefined,
+  workspaceId: string | undefined,
   limitKind: LimitKind = 'read',
 ): Promise<RequestContext> {
   const token = bearerToken(request);
@@ -52,7 +58,7 @@ export async function resolveRequestContext(
     const identity = await resolveApiKey(token);
     const workspace = await loadWorkspaceById(identity.workspaceId);
 
-    if (slug && workspace.slug !== slug) {
+    if (workspaceId && workspace.id !== workspaceId) {
       throw new AppError(
         'FORBIDDEN',
         'This API key belongs to a different workspace.',
@@ -77,23 +83,45 @@ export async function resolveRequestContext(
   }
 
   const user = await getSessionUser();
-  if (!user) throw new AppError('UNAUTHENTICATED', 'Sign in to continue.');
-  if (!slug) throw new AppError('WORKSPACE_NOT_FOUND', 'No workspace was specified.');
+  if (!user) throw new AppError('UNAUTHORIZED', 'Sign in to continue.');
+  if (!workspaceId) {
+    throw new AppError(
+      'WORKSPACE_REQUIRED',
+      'Send the workspace id in the X-Workspace-Id header.',
+    );
+  }
+  if (!UUID_RE.test(workspaceId)) {
+    throw new AppError(
+      'WORKSPACE_REQUIRED',
+      'X-Workspace-Id must be a workspace id (uuid), not a slug.',
+    );
+  }
 
-  const context = await resolveSessionContext(user, slug);
+  const workspace = await loadWorkspaceById(workspaceId).catch(() => {
+    // Same shape as a membership miss: confirming that a workspace id exists
+    // to a non-member leaks the customer list.
+    throw new AppError('NOT_FOUND', 'That workspace does not exist, or you do not have access.');
+  });
+  const context = await resolveMembershipContext(user, workspace);
   const rateLimit = await checkRateLimit(limitKind, `user:${user.id}:${context.workspace.id}`);
   assertWithinLimit(rateLimit);
 
   return { ...context, rateLimit };
 }
 
-/** The page/server-action path: session only, no API keys. */
+/** The page/server-action path: session only, addressed by URL slug. */
 export async function resolveSessionContext(
   user: SessionUser,
   slug: string,
 ): Promise<{ user: SessionUser; workspace: Workspace; actor: Actor }> {
   const workspace = await loadWorkspaceBySlug(slug);
+  return resolveMembershipContext(user, workspace);
+}
 
+async function resolveMembershipContext(
+  user: SessionUser,
+  workspace: Workspace,
+): Promise<{ user: SessionUser; workspace: Workspace; actor: Actor }> {
   // `workspace_members` is a tenant table, so this must run *inside* the
   // workspace context. Reading it through `withoutWorkspace` returns zero rows
   // — RLS fails closed — and a legitimate owner is told they have no access.
@@ -115,13 +143,13 @@ export async function resolveSessionContext(
   if (!membership) {
     // Deliberately the same message a missing workspace gets: telling a
     // non-member that a workspace exists at this slug leaks the customer list.
-    throw new AppError('WORKSPACE_NOT_FOUND', 'That workspace does not exist, or you do not have access.');
+    throw new AppError('NOT_FOUND', 'That workspace does not exist, or you do not have access.');
   }
   if (membership.status === 'pending') {
-    throw new AppError('NOT_A_MEMBER', 'Accept your invitation to open this workspace.');
+    throw new AppError('FORBIDDEN', 'Accept your invitation to open this workspace.');
   }
   if (membership.status === 'suspended') {
-    throw new AppError('NOT_A_MEMBER', 'Your access to this workspace has been suspended.');
+    throw new AppError('FORBIDDEN', 'Your access to this workspace has been suspended.');
   }
 
   const actor: Actor = {
@@ -187,7 +215,7 @@ async function loadWorkspaceBySlug(slug: string): Promise<Workspace> {
     return rows[0] ?? null;
   });
   if (!workspace) {
-    throw new AppError('WORKSPACE_NOT_FOUND', 'That workspace does not exist, or you do not have access.');
+    throw new AppError('NOT_FOUND', 'That workspace does not exist, or you do not have access.');
   }
   return workspace;
 }
@@ -197,7 +225,7 @@ async function loadWorkspaceById(id: string): Promise<Workspace> {
     const rows = await tx.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
     return rows[0] ?? null;
   });
-  if (!workspace) throw new AppError('WORKSPACE_NOT_FOUND', 'That workspace no longer exists.');
+  if (!workspace) throw new AppError('NOT_FOUND', 'That workspace no longer exists.');
   return workspace;
 }
 

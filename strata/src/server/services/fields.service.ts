@@ -9,7 +9,7 @@
  * perform most casually.
  */
 
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Tx } from '@/server/db';
 import { fields as fieldsTable, type Field } from '@/server/db/schema/itemTypes';
 import { items } from '@/server/db/schema/items';
@@ -23,50 +23,21 @@ import { requiredFieldNeedsAcknowledgement } from './completeness.service';
 import { slugifyKey, assertValidKey } from './itemTypes.service';
 
 /**
- * Turns on `is_indexed` for fields a query just referenced, and enqueues a
- * backfill for their existing values.
- *
- * Indexing every field up front triples write cost for fields nobody ever
- * filters. Indexing on first use costs one extra write the first time a field
- * is filtered and nothing thereafter.
+ * Field types that are always projected into `item_field_index` (Tech Spec
+ * §2.2): they are overwhelmingly what people filter and group by, and a select
+ * column that cannot back a board view is broken on arrival. Everything else
+ * starts un-indexed and is enabled explicitly — a filter on an un-indexed
+ * field returns FIELD_NOT_FILTERABLE with the PATCH that fixes it, never a
+ * silent inline backfill (API Design §4.1).
  */
-export async function ensureFieldsIndexed(
-  tx: Tx,
-  workspaceId: string,
-  fieldKeys: readonly string[],
-  liveFields: readonly Field[],
-): Promise<string[]> {
-  if (fieldKeys.length === 0) return [];
-
-  const byKey = new Map(liveFields.map((f) => [f.key, f]));
-  const toIndex = fieldKeys
-    .map((key) => byKey.get(key))
-    .filter((f): f is Field => f !== undefined && !f.isIndexed);
-
-  if (toIndex.length === 0) return [];
-
-  await tx
-    .update(fieldsTable)
-    .set({ isIndexed: true, updatedAt: new Date() })
-    .where(
-      and(
-        eq(fieldsTable.workspaceId, workspaceId),
-        inArray(
-          fieldsTable.id,
-          toIndex.map((f) => f.id),
-        ),
-      ),
-    );
-
-  // Backfill inline. Above a few thousand items this is the `fieldBackfill`
-  // job's work; the sync path exists so the very first filter on a small
-  // workspace returns correct results immediately rather than an empty grid.
-  for (const field of toIndex) {
-    await backfillField(tx, workspaceId, field);
-  }
-
-  return toIndex.map((f) => f.id);
-}
+export const ALWAYS_INDEXED_TYPES: ReadonlySet<FieldType> = new Set([
+  'select',
+  'multi_select',
+  'date',
+  'datetime',
+  'user',
+  'checkbox',
+]);
 
 /**
  * Populates `item_field_index` for one field across every item of its type.
@@ -113,7 +84,7 @@ export async function backfillField(tx: Tx, workspaceId: string, field: Field): 
     from items i
     where i.workspace_id = ${workspaceId}::uuid
       and i.item_type_id = ${field.itemTypeId}::uuid
-      and i.deleted_at is null
+      and i.archived_at is null
       and i.effective_values ? ${key}
       and jsonb_typeof(i.effective_values -> ${key}) <> 'null'
     on conflict (item_id, field_id) do update set
@@ -134,12 +105,12 @@ export interface CreateFieldInput {
   key?: string;
   type: FieldType;
   config?: FieldConfig;
-  required?: boolean;
+  requiredForCompleteness?: boolean;
   inheritance?: 'shared' | 'variant';
   helpText?: string;
   fieldGroupId?: string | null;
   defaultValue?: unknown;
-  countsTowardCompleteness?: boolean;
+  isIndexed?: boolean;
   isSearchable?: boolean;
   acknowledgeIncomplete?: boolean;
 }
@@ -155,10 +126,10 @@ export async function createField(
   const key = input.key ?? slugifyKey(input.label, taken);
   assertValidKey(key);
   if (taken.has(key)) {
-    throw new AppError('FIELD_KEY_TAKEN', `A field with the key "${key}" already exists here.`);
+    throw new AppError('CONFLICT', `A field with the key "${key}" already exists here.`);
   }
 
-  if (input.required) {
+  if (input.requiredForCompleteness) {
     const [{ count } = { count: 0 }] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(items)
@@ -166,7 +137,7 @@ export async function createField(
         and(
           eq(items.workspaceId, workspaceId),
           eq(items.itemTypeId, input.itemTypeId),
-          isNull(items.deletedAt),
+          isNull(items.archivedAt),
         ),
       );
 
@@ -176,15 +147,15 @@ export async function createField(
       // completeness overnight. Surfacing that before it happens is the
       // difference between a metric people trust and one they learn to ignore.
       throw new AppError(
-        'REQUIRED_FIELD_NEEDS_ACKNOWLEDGEMENT',
+        'REQUIRES_ACKNOWLEDGMENT',
         `${count.toLocaleString()} existing ${count === 1 ? 'item' : 'items'} have no value for this field, so their completeness will drop. Give the field a default value, or confirm you want to leave them incomplete.`,
         { affectedItems: count },
       );
     }
   }
 
-  const lastKey = existing[existing.length - 1]?.orderKey ?? null;
-  const [orderKey] = appendKeys(lastKey, 1);
+  const lastKey = existing[existing.length - 1]?.position ?? null;
+  const [position] = appendKeys(lastKey, 1);
 
   const [created] = await tx
     .insert(fieldsTable)
@@ -197,17 +168,17 @@ export async function createField(
       type: input.type,
       config: (input.config ?? {}) as FieldConfig,
       helpText: input.helpText ?? null,
-      required: input.required ?? false,
+      requiredForCompleteness: input.requiredForCompleteness ?? false,
       defaultValue: input.defaultValue ?? null,
-      inheritance: input.inheritance ?? 'shared',
-      countsTowardCompleteness: input.countsTowardCompleteness ?? true,
+      inheritance: input.inheritance ?? 'variant',
+      isIndexed: ALWAYS_INDEXED_TYPES.has(input.type) || (input.isIndexed ?? false),
       isSearchable: input.isSearchable ?? false,
-      orderKey: orderKey as string,
+      position: position as string,
       createdBy: actorId,
     })
     .returning();
 
-  if (!created) throw new AppError('INTERNAL', 'Could not create the field.');
+  if (!created) throw new AppError('INTERNAL_ERROR', 'Could not create the field.');
   await invalidateSchemaCache(workspaceId, input.itemTypeId);
   return created;
 }
@@ -228,7 +199,7 @@ export async function listFields(
         opts.includeDeleted ? undefined : isNull(fieldsTable.deletedAt),
       ),
     )
-    .orderBy(fieldsTable.orderKey);
+    .orderBy(fieldsTable.position);
 }
 
 export interface ConversionPreview {
@@ -264,7 +235,7 @@ export async function previewFieldTypeChange(
       and(
         eq(items.workspaceId, workspaceId),
         eq(items.itemTypeId, field.itemTypeId),
-        isNull(items.deletedAt),
+        isNull(items.archivedAt),
       ),
     );
 
@@ -319,7 +290,7 @@ export async function updateField(
 
   if (patch.key !== undefined && patch.key !== field.key) {
     throw new AppError(
-      'FIELD_KEY_IMMUTABLE',
+      'VALIDATION_ERROR',
       'A field key cannot change once it exists — every stored value is keyed by it. Rename the label instead.',
     );
   }
@@ -340,18 +311,25 @@ export async function updateField(
     }
   }
 
+  const nextType = (patch.type ?? field.type) as FieldType;
+  // Always-on types cannot be un-indexed (Tech Spec §2.2); anything else is
+  // whatever the caller chose, defaulting to its current setting.
+  const nextIndexed = ALWAYS_INDEXED_TYPES.has(nextType)
+    ? true
+    : (patch.isIndexed ?? field.isIndexed);
+
   const [updated] = await tx
     .update(fieldsTable)
     .set({
       label: patch.label ?? field.label,
-      type: (patch.type ?? field.type) as FieldType,
+      type: nextType,
       config: (patch.config ?? field.config) as FieldConfig,
       helpText: patch.helpText ?? field.helpText,
-      required: patch.required ?? field.required,
+      requiredForCompleteness:
+        patch.requiredForCompleteness ?? field.requiredForCompleteness,
       inheritance: patch.inheritance ?? field.inheritance,
       defaultValue: patch.defaultValue ?? field.defaultValue,
-      countsTowardCompleteness:
-        patch.countsTowardCompleteness ?? field.countsTowardCompleteness,
+      isIndexed: nextIndexed,
       isSearchable: patch.isSearchable ?? field.isSearchable,
       fieldGroupId: patch.fieldGroupId === undefined ? field.fieldGroupId : patch.fieldGroupId,
       updatedAt: new Date(),
@@ -359,7 +337,7 @@ export async function updateField(
     .where(eq(fieldsTable.id, fieldId))
     .returning();
 
-  if (!updated) throw new AppError('INTERNAL', 'Could not update the field.');
+  if (!updated) throw new AppError('INTERNAL_ERROR', 'Could not update the field.');
 
   if (typeChanged) {
     // The stored values are re-coerced by the caller's change set; the index
@@ -367,6 +345,13 @@ export async function updateField(
     // are cleared and rebuilt from the new type.
     await tx.delete(itemFieldIndex).where(eq(itemFieldIndex.fieldId, fieldId));
     if (updated.isIndexed) await backfillField(tx, workspaceId, updated);
+  } else if (nextIndexed && !field.isIndexed) {
+    // This is the opt-in the FIELD_NOT_FILTERABLE error points at: indexing
+    // happens here, on an explicit PATCH, never inline inside a filter. (At
+    // Inngest scale this hands off to the `fieldBackfill` job.)
+    await backfillField(tx, workspaceId, updated);
+  } else if (!nextIndexed && field.isIndexed) {
+    await tx.delete(itemFieldIndex).where(eq(itemFieldIndex.fieldId, fieldId));
   }
 
   await invalidateSchemaCache(workspaceId, field.itemTypeId);
@@ -433,7 +418,7 @@ export async function restoreField(tx: Tx, workspaceId: string, fieldId: string)
 
   if (clash[0]) {
     throw new AppError(
-      'FIELD_KEY_TAKEN',
+      'CONFLICT',
       `A field using the key "${field.key}" was created after this one was deleted. Rename it before restoring.`,
     );
   }
@@ -444,7 +429,7 @@ export async function restoreField(tx: Tx, workspaceId: string, fieldId: string)
     .where(eq(fieldsTable.id, fieldId))
     .returning();
 
-  if (!restored) throw new AppError('INTERNAL', 'Could not restore the field.');
+  if (!restored) throw new AppError('INTERNAL_ERROR', 'Could not restore the field.');
   if (restored.isIndexed) await backfillField(tx, workspaceId, restored);
   await invalidateSchemaCache(workspaceId, field.itemTypeId);
   return restored;
@@ -454,11 +439,11 @@ export async function reorderField(
   tx: Tx,
   workspaceId: string,
   fieldId: string,
-  orderKey: string,
+  position: string,
 ): Promise<void> {
   await tx
     .update(fieldsTable)
-    .set({ orderKey, updatedAt: new Date() })
+    .set({ position, updatedAt: new Date() })
     .where(and(eq(fieldsTable.workspaceId, workspaceId), eq(fieldsTable.id, fieldId)));
 }
 

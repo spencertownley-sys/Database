@@ -39,14 +39,14 @@ export const MAX_HIERARCHY_DEPTH = 32;
 
 export function encodeLabel(id: string): string {
   if (!UUID_RE.test(id)) {
-    throw new AppError('INTERNAL', `Cannot encode "${id}" as an ltree label: not a uuid.`);
+    throw new AppError('INTERNAL_ERROR', `Cannot encode "${id}" as an ltree label: not a uuid.`);
   }
   return id.replaceAll('-', '_');
 }
 
 export function decodeLabel(label: string): string {
   if (!LABEL_RE.test(label)) {
-    throw new AppError('INTERNAL', `Cannot decode "${label}": not a valid ltree label.`);
+    throw new AppError('INTERNAL_ERROR', `Cannot decode "${label}": not a valid ltree label.`);
   }
   return label.replaceAll('_', '-');
 }
@@ -56,7 +56,7 @@ export function buildPath(ancestorIds: readonly string[], selfId: string): strin
   const labels = [...ancestorIds, selfId].map(encodeLabel);
   if (labels.length > MAX_HIERARCHY_DEPTH) {
     throw new AppError(
-      'HIERARCHY_DEPTH_EXCEEDED',
+      'VALIDATION_ERROR',
       `Nesting is limited to ${MAX_HIERARCHY_DEPTH} levels; this would be ${labels.length}.`,
     );
   }
@@ -70,7 +70,7 @@ export function childPath(parentPath: string | null, childId: string): string {
   const depth = pathDepth(parentPath) + 1;
   if (depth > MAX_HIERARCHY_DEPTH) {
     throw new AppError(
-      'HIERARCHY_DEPTH_EXCEEDED',
+      'VALIDATION_ERROR',
       `Nesting is limited to ${MAX_HIERARCHY_DEPTH} levels; this would be ${depth}.`,
     );
   }
@@ -91,7 +91,7 @@ export function pathDepth(path: string): number {
 export function selfIdOf(path: string): string {
   const labels = path.split('.');
   const last = labels[labels.length - 1];
-  if (!last) throw new AppError('INTERNAL', `Empty ltree path.`);
+  if (!last) throw new AppError('INTERNAL_ERROR', `Empty ltree path.`);
   return decodeLabel(last);
 }
 
@@ -160,7 +160,7 @@ export function assertDepthAfterMove(
   const resulting = deepestDescendantDepth + delta;
   if (resulting > MAX_HIERARCHY_DEPTH) {
     throw new AppError(
-      'HIERARCHY_DEPTH_EXCEEDED',
+      'VALIDATION_ERROR',
       `That move would nest items ${resulting} levels deep; the limit is ${MAX_HIERARCHY_DEPTH}.`,
     );
   }

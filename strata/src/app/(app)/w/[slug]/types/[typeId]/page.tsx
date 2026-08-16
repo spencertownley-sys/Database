@@ -8,6 +8,8 @@ import { getItemTypeWithSchema } from '@/server/services/itemTypes.service';
 import { editableFieldKeysFor } from '@/server/services/permissions.service';
 import { GridWorkspace } from '@/components/grid/GridWorkspace';
 import { AppError } from '@/server/lib/errors';
+import { checkDatabaseReadiness } from '@/server/db/readiness';
+import { SetupHelp } from '@/components/SetupHelp';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +19,12 @@ export default async function ItemTypeGridPage({
   params: Promise<{ slug: string; typeId: string }>;
 }) {
   const { slug, typeId } = await params;
+
+  // Pages render in parallel with the layout, so a broken local setup would
+  // surface here as a masked Server Component error before the layout's
+  // SetupHelp could — every DB-touching page carries its own guard.
+  const readiness = await checkDatabaseReadiness();
+  if (readiness.state !== 'ready') return <SetupHelp readiness={readiness} />;
 
   const user = await getSessionUser();
   if (!user) notFound();
@@ -51,6 +59,7 @@ export default async function ItemTypeGridPage({
   return (
     <GridWorkspace
       workspaceSlug={slug}
+      workspaceId={context.workspace.id}
       itemType={itemType}
       members={members}
       editableFieldKeys={editableFieldKeysFor(context.actor, [])}

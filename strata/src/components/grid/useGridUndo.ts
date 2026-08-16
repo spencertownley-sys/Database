@@ -46,12 +46,17 @@ export function useGridUndo(onChanged: () => void): UndoController {
     if (!entry) return { status: 'none' };
 
     try {
-      const result = await api.changeSets.undo(entry.changeSetId);
+      // Reverse commit order, so overlapping writes unwind the way they landed.
+      const undoIds: string[] = [];
+      for (const changeSetId of [...entry.changeSetIds].reverse()) {
+        const result = await api.changeSets.undo(changeSetId);
+        undoIds.push(result.undoChangeSetId);
+      }
       // The undo is itself a change set, so redo is undoing *that* one rather
       // than replaying the original — which keeps redo exact even if the
       // original operation is no longer expressible against current data.
       store.pushRedo({
-        changeSetId: result.changeSet.id,
+        changeSetIds: undoIds,
         label: entry.label,
         itemCount: entry.itemCount,
         at: Date.now(),
@@ -62,6 +67,7 @@ export function useGridUndo(onChanged: () => void): UndoController {
       // Put it back: a failed undo must not consume the stack entry, or the
       // user loses the ability to retry after fixing whatever blocked it.
       store.pushUndo(entry);
+      onChanged();
       return {
         status: 'failed',
         message:
@@ -76,9 +82,13 @@ export function useGridUndo(onChanged: () => void): UndoController {
     if (!entry) return { status: 'none' };
 
     try {
-      const result = await api.changeSets.undo(entry.changeSetId);
+      const undoIds: string[] = [];
+      for (const changeSetId of [...entry.changeSetIds].reverse()) {
+        const result = await api.changeSets.undo(changeSetId);
+        undoIds.push(result.undoChangeSetId);
+      }
       store.pushUndo({
-        changeSetId: result.changeSet.id,
+        changeSetIds: undoIds,
         label: entry.label,
         itemCount: entry.itemCount,
         at: Date.now(),
@@ -87,6 +97,7 @@ export function useGridUndo(onChanged: () => void): UndoController {
       return { status: 'redone', label: entry.label, itemCount: entry.itemCount };
     } catch (error) {
       store.pushRedo(entry);
+      onChanged();
       return {
         status: 'failed',
         message:

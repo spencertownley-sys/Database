@@ -24,10 +24,11 @@ export const trees = pgTable(
     id: primaryId(),
     workspaceId: workspaceIdColumn().references(() => workspaces.id, { onDelete: 'cascade' }),
     key: text('key').notNull(),
-    name: text('name').notNull(),
+    label: text('label').notNull(),
     description: text('description'),
     icon: text('icon'),
     isBuiltIn: boolean('is_built_in').notNull().default(false),
+    position: integer('position').notNull().default(0),
     ...timestamps(),
     deletedAt: deletedAt(),
   },
@@ -42,13 +43,15 @@ export const treeNodes = pgTable(
     treeId: uuid('tree_id')
       .notNull()
       .references(() => trees.id, { onDelete: 'cascade' }),
+    // RESTRICT: deleting a node with children must go through the explicit
+    // disposition flow (NODE_HAS_MEMBERS), never silently take a subtree.
     parentId: uuid('parent_id').references((): AnyPgColumn => treeNodes.id, {
-      onDelete: 'cascade',
+      onDelete: 'restrict',
     }),
     /** Self-inclusive, same encoding as `items.path`. */
     path: ltree('path').notNull(),
-    orderKey: text('order_key').notNull(),
-    name: text('name').notNull(),
+    position: text('position').notNull(),
+    label: text('label').notNull(),
     description: text('description'),
     color: text('color'),
     /**
@@ -61,7 +64,7 @@ export const treeNodes = pgTable(
   },
   (t) => [
     index('tree_nodes_path_gist').using('gist', t.path),
-    index('tree_nodes_tree_parent_idx').on(t.treeId, t.parentId, t.orderKey),
+    index('tree_nodes_tree_parent_idx').on(t.treeId, t.parentId, t.position),
     index('tree_nodes_ws_idx').on(t.workspaceId),
   ],
 );

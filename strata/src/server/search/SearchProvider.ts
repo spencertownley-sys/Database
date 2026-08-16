@@ -25,9 +25,18 @@ export interface SearchQuery {
   search?: string;
   /** Restrict to a work-hierarchy subtree, inclusive of the root. */
   underItemId?: string;
+  /** Direct children of one parent only. */
+  parentId?: string;
+  /** Variants of one model. */
+  variantParentId?: string;
   /** Restrict to a category tree node. */
   treeNodeId?: string;
   treeIncludeDescendants?: boolean;
+  /**
+   * Guest visibility: only items in one of these granted branches. Present
+   * (even empty) means the caller is a guest — empty matches nothing.
+   */
+  guestScopes?: Array<{ treeNodePath: string; includeDescendants: boolean }>;
   incompleteOnly?: boolean;
   /** Variants are hidden by default; the grid shows them under their model. */
   includeVariants?: boolean;
@@ -40,8 +49,12 @@ export interface SearchPage {
   items: Item[];
   /** Absent when this is the last page. */
   nextCursor?: string;
-  /** Only computed when `withTotal` is requested — it costs a second scan. */
-  total?: number;
+  /**
+   * Only computed when `withTotal` is requested — it costs a second scan.
+   * `null` when the count exceeds 10,000 (API Design §1.2): past that point an
+   * exact number is not worth the rows it reads.
+   */
+  total?: number | null;
 }
 
 export interface GroupBucket {
@@ -68,7 +81,7 @@ export interface SearchProvider {
     workspaceId: string,
     fields: readonly Field[],
     query: Omit<SearchQuery, 'limit' | 'cursor'>,
-  ): Promise<number>;
+  ): Promise<number | null>;
 
   groupCounts(
     tx: Tx,

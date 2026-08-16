@@ -35,6 +35,7 @@ import { itemFieldIndex, items } from './schema/items';
 import { itemTreeNodes, treeNodes, trees } from './schema/trees';
 import { views } from './schema/views';
 import { computeCompleteness } from '../services/completeness.service';
+import { ALWAYS_INDEXED_TYPES } from '../services/fields.service';
 import { computeEffectiveValues, ownEffectiveValues } from '../services/variants.service';
 import { buildSearchText } from '../search/projection';
 import { toIndexValue } from '../validation/fieldTypes';
@@ -147,8 +148,7 @@ interface SeededSchema {
     key: string;
     type: (typeof ITEM_TYPE_PRESETS)[number]['fields'][number]['type'];
     config: Record<string, unknown>;
-    required: boolean;
-    countsTowardCompleteness: boolean;
+    requiredForCompleteness: boolean;
     inheritance: 'shared' | 'variant';
     isIndexed: boolean;
     isSearchable: boolean;
@@ -162,9 +162,10 @@ interface PendingItem {
   title: string;
   parentId: string | null;
   path: string;
-  orderKey: string;
+  depth: number;
+  position: string;
   isVariantModel: boolean;
-  variantOfId: string | null;
+  variantParentId: string | null;
   variantAxisValues: Record<string, string> | null;
   values: Record<string, unknown>;
   effectiveValues: Record<string, unknown>;
@@ -235,12 +236,12 @@ async function seedItemTypeSchema(
     id: typeId,
     workspaceId,
     key: preset.key,
-    name: preset.name,
-    pluralName: preset.pluralName,
+    label: preset.label,
+    pluralLabel: preset.pluralLabel,
     description: preset.description,
     icon: preset.icon,
     color: preset.color,
-    presetKey: preset.key,
+    presetSource: preset.key,
     variantAxes: preset.variantAxes ?? [],
     createdBy: actorId,
   });
@@ -252,7 +253,7 @@ async function seedItemTypeSchema(
     itemTypeId: typeId,
     key: g.key,
     label: g.label,
-    orderKey: groupOrder[i] as string,
+    position: groupOrder[i] as string,
     collapsedByDefault: g.collapsedByDefault ?? false,
   }));
   if (groupRows.length) await db.insert(fieldGroups).values(groupRows);
@@ -269,13 +270,12 @@ async function seedItemTypeSchema(
     type: f.type,
     config: (f.config ?? {}) as Record<string, unknown>,
     helpText: f.helpText ?? null,
-    required: f.required ?? false,
+    requiredForCompleteness: f.requiredForCompleteness ?? false,
     defaultValue: f.defaultValue ?? null,
-    inheritance: f.inheritance ?? ('shared' as const),
-    isIndexed: f.isIndexed ?? false,
+    inheritance: f.inheritance ?? ('variant' as const),
+    isIndexed: ALWAYS_INDEXED_TYPES.has(f.type) || (f.isIndexed ?? false),
     isSearchable: f.isSearchable ?? false,
-    countsTowardCompleteness: f.countsTowardCompleteness ?? true,
-    orderKey: fieldOrder[i] as string,
+    position: fieldOrder[i] as string,
     createdBy: actorId,
   }));
   if (fieldRows.length) {
@@ -290,8 +290,7 @@ async function seedItemTypeSchema(
       key: f.key,
       type: f.type,
       config: f.config,
-      required: f.required,
-      countsTowardCompleteness: f.countsTowardCompleteness,
+      requiredForCompleteness: f.requiredForCompleteness,
       inheritance: f.inheritance,
       isIndexed: f.isIndexed,
       isSearchable: f.isSearchable,
@@ -303,7 +302,7 @@ async function seedItemTypeSchema(
 function finalize(
   item: Omit<
     PendingItem,
-    'effectiveValues' | 'completenessPct' | 'missingRequired' | 'searchText'
+    'depth' | 'effectiveValues' | 'completenessPct' | 'missingRequired' | 'searchText'
   >,
   schemaDef: SeededSchema,
   modelValues?: Record<string, unknown>,
@@ -312,24 +311,24 @@ function finalize(
     key: f.key,
     type: f.type,
     config: f.config as never,
-    required: f.required,
-    countsTowardCompleteness: f.countsTowardCompleteness,
+    requiredForCompleteness: f.requiredForCompleteness,
     inheritance: f.inheritance,
     isSearchable: f.isSearchable,
   }));
 
   const effectiveValues = modelValues
-    ? computeEffectiveValues(modelValues, item.values, fieldDefs).values
+    ? computeEffectiveValues(modelValues, item.values, fieldDefs, schemaDef.preset.variantAxes ?? [])
+        .values
     : ownEffectiveValues(item.values, fieldDefs);
 
   const completeness = computeCompleteness({
     effectiveValues,
     fields: fieldDefs,
-    title: item.title,
   });
 
   return {
     ...item,
+    depth: item.path.split('.').length - 1,
     effectiveValues,
     completenessPct: completeness.pct,
     missingRequired: completeness.missingRequired,
@@ -429,7 +428,7 @@ async function seedWorkspace(
     id: treeId,
     workspaceId,
     key: 'clients',
-    name: 'Clients',
+    label: 'Clients',
     description: 'Who the work belongs to.',
     isBuiltIn: true,
     icon: 'folder',
@@ -441,8 +440,8 @@ async function seedWorkspace(
     treeId: string;
     parentId: string | null;
     path: string;
-    orderKey: string;
-    name: string;
+    position: string;
+    label: string;
     itemCount: number;
   }> = [];
 
@@ -458,8 +457,8 @@ async function seedWorkspace(
       treeId,
       parentId: null,
       path: rootPath,
-      orderKey: rootKeys[i] as string,
-      name: clientName,
+      position: rootKeys[i] as string,
+      label: clientName,
       itemCount: 0,
     });
 
@@ -474,8 +473,8 @@ async function seedWorkspace(
         treeId,
         parentId: rootId,
         path,
-        orderKey: childKeys[j] as string,
-        name: childName,
+        position: childKeys[j] as string,
+        label: childName,
         itemCount: 0,
       });
       leafNodeIds.push(childId);
@@ -492,8 +491,8 @@ async function seedWorkspace(
             treeId,
             parentId: childId,
             path: childPath(path, grandId),
-            orderKey: grandKeys[k] as string,
-            name: grandName,
+            position: grandKeys[k] as string,
+            label: grandName,
             itemCount: 0,
           });
           leafNodeIds.push(grandId);
@@ -539,9 +538,9 @@ async function seedWorkspace(
           title,
           parentId: null,
           path,
-          orderKey: projectOrder[p] as string,
+          position: projectOrder[p] as string,
           isVariantModel: false,
-          variantOfId: null,
+          variantParentId: null,
           variantAxisValues: null,
           values,
           assigneeId: (values.account_lead as string) ?? null,
@@ -552,7 +551,7 @@ async function seedWorkspace(
       ),
     );
 
-    const node = nodeRows.find((n) => n.name === clientName);
+    const node = nodeRows.find((n) => n.label === clientName);
     if (node) {
       memberships.push({ workspaceId, itemId: projectId, treeNodeId: node.id, treeId });
     }
@@ -581,9 +580,9 @@ async function seedWorkspace(
             title: TASK_TITLES[(p * 3 + t) % TASK_TITLES.length] as string,
             parentId: projectId,
             path: taskPath,
-            orderKey: taskOrder[t] as string,
+            position: taskOrder[t] as string,
             isVariantModel: false,
-            variantOfId: null,
+            variantParentId: null,
             variantAxisValues: null,
             values: taskValues,
             assigneeId: (taskValues.assignee as string) ?? null,
@@ -613,9 +612,9 @@ async function seedWorkspace(
                 title: `${TASK_TITLES[(t + s) % TASK_TITLES.length]} — part ${s + 1}`,
                 parentId: taskId,
                 path: childPath(taskPath, subId),
-                orderKey: subOrder[s] as string,
+                position: subOrder[s] as string,
                 isVariantModel: false,
-                variantOfId: null,
+                variantParentId: null,
                 variantAxisValues: null,
                 values: subValues,
                 assigneeId: (subValues.assignee as string) ?? null,
@@ -652,9 +651,9 @@ async function seedWorkspace(
           title: CAMPAIGN_TITLES[c % CAMPAIGN_TITLES.length] as string,
           parentId: null,
           path: childPath(null, campaignId),
-          orderKey: campaignOrder[c] as string,
+          position: campaignOrder[c] as string,
           isVariantModel: false,
-          variantOfId: null,
+          variantParentId: null,
           variantAxisValues: null,
           values,
           assigneeId: (values.owner as string) ?? null,
@@ -683,6 +682,9 @@ async function seedWorkspace(
         care_instructions: 'Machine wash cold. Do not tumble dry.',
         launch_date: isoDate(45 + i * 14),
         hero_image: 'https://example.com/hero.jpg',
+        // Base price on the model: `price` is `variant`-inheritance, so
+        // variants inherit this until they deliberately override it.
+        price: 90 + i * 10,
       };
 
       pending.push(
@@ -694,9 +696,9 @@ async function seedWorkspace(
             title: productTitle,
             parentId: null,
             path: childPath(null, modelId),
-            orderKey: modelOrder[i] as string,
+            position: modelOrder[i] as string,
             isVariantModel: true,
-            variantOfId: null,
+            variantParentId: null,
             variantAxisValues: null,
             values: modelValues,
             assigneeId: null,
@@ -722,13 +724,11 @@ async function seedWorkspace(
             region,
             size,
           };
-          if (maybe(0.85)) variantValues.price = 80 + Math.floor(rand() * 12) * 5;
+          // Most variants inherit the model's base price; a handful override
+          // it, so propagation tests have values that must *not* move when
+          // the model is edited.
+          if (maybe(0.35)) variantValues.price = 80 + Math.floor(rand() * 12) * 5;
           if (maybe(0.6)) variantValues.stock_on_hand = Math.floor(rand() * 400);
-          // A handful of genuine overrides, so propagation tests have
-          // something that must *not* move.
-          if (maybe(0.15)) {
-            variantValues.description = `${productTitle} — ${region.toUpperCase()} edition with regional trim.`;
-          }
 
           pending.push(
             finalize(
@@ -739,9 +739,9 @@ async function seedWorkspace(
                 title: `${productTitle} · ${region.toUpperCase()} · ${size.toUpperCase()}`,
                 parentId: null,
                 path: childPath(null, variantId),
-                orderKey: variantKeys[v] as string,
+                position: variantKeys[v] as string,
                 isVariantModel: false,
-                variantOfId: modelId,
+                variantParentId: modelId,
                 variantAxisValues: { region, size },
                 values: variantValues,
                 assigneeId: null,
@@ -804,7 +804,7 @@ async function seedWorkspace(
   // --- guest scope ---------------------------------------------------------
   if (spec.guestEmail) {
     const guestMemberId = memberIdByEmail.get(spec.guestEmail);
-    const scopedNode = nodeRows.find((n) => n.name === CLIENT_NAMES[0]);
+    const scopedNode = nodeRows.find((n) => n.label === CLIENT_NAMES[0]);
     if (guestMemberId && scopedNode) {
       await db.insert(guestScopes).values({
         id: uuid(),
@@ -835,7 +835,7 @@ async function main(): Promise<void> {
       name: 'Northwind Agency',
       members: [
         ['alice@northwind.test', 'owner'],
-        ['bob@northwind.test', 'editor'],
+        ['bob@northwind.test', 'member'],
         ['carol@northwind.test', 'viewer'],
         ['morgan@shared.test', 'admin'],
         ['dana@client.test', 'guest'],
@@ -855,7 +855,7 @@ async function main(): Promise<void> {
       name: 'Northwind Partners',
       members: [
         ['erin@partners.test', 'owner'],
-        ['frank@partners.test', 'editor'],
+        ['frank@partners.test', 'member'],
         ['morgan@shared.test', 'viewer'],
       ],
       projectCount: 4,

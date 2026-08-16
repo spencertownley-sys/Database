@@ -116,7 +116,7 @@ async function someTaskIds(tx: AppTx, limit: number): Promise<string[]> {
       and(
         eq(items.workspaceId, workspaceId),
         eq(items.itemTypeId, typeId),
-        isNull(items.deletedAt),
+        isNull(items.archivedAt),
       ),
     )
     .orderBy(items.id)
@@ -156,7 +156,7 @@ describe('undo fidelity — all nine operations', () => {
         select id from items
         where workspace_id = ${workspaceId}
           and item_type_id = ${typeId}::uuid
-          and deleted_at is null
+          and archived_at is null
           and values ? 'priority'
         order by id limit 8
       `);
@@ -192,8 +192,8 @@ describe('undo fidelity — all nine operations', () => {
         select p.id as parent_id, p.parent_id as grandparent_id
         from items p
         where p.workspace_id = ${workspaceId}
-          and p.deleted_at is null
-          and exists (select 1 from items c where c.parent_id = p.id and c.deleted_at is null)
+          and p.archived_at is null
+          and exists (select 1 from items c where c.parent_id = p.id and c.archived_at is null)
         order by p.id
         limit 1
       `);
@@ -204,7 +204,7 @@ describe('undo fidelity — all nine operations', () => {
         select id from items
         where workspace_id = ${workspaceId}
           and parent_id is null
-          and deleted_at is null
+          and archived_at is null
           and is_variant_model = false
           and id <> ${moving.grandparent_id ?? moving.parent_id}::uuid
         order by id limit 1
@@ -262,7 +262,7 @@ describe('undo fidelity — all nine operations', () => {
     await roundTrip('assign_user', async (tx) => {
       const rows = await tx.execute(sql`
         select m.user_id from workspace_members m
-        where m.workspace_id = ${workspaceId} and m.role = 'editor' and m.user_id is not null
+        where m.workspace_id = ${workspaceId} and m.role = 'member' and m.user_id is not null
         limit 1
       `);
       const editor = ([...rows][0] ?? null) as { user_id: string } | null;
@@ -280,8 +280,8 @@ describe('undo fidelity — all nine operations', () => {
       const rows = await tx.execute(sql`
         select p.id from items p
         where p.workspace_id = ${workspaceId}
-          and p.deleted_at is null
-          and exists (select 1 from items c where c.parent_id = p.id and c.deleted_at is null)
+          and p.archived_at is null
+          and exists (select 1 from items c where c.parent_id = p.id and c.archived_at is null)
         order by p.id limit 1
       `);
       const target = ([...rows][0] ?? null) as { id: string } | null;

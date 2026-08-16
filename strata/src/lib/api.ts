@@ -1,53 +1,119 @@
 /**
  * The typed API client. Every fetch in the app goes through here.
  *
- * The app calls `/api/v1` — the same routes customers do. There is no internal
- * endpoint with different validation or a shortcut around the change-set write
- * path, which is what makes "the published spec is the app's own API" a
- * testable claim rather than an aspiration.
+ * The app calls `/api/v1` — the same routes customers do, speaking the same
+ * wire format: snake_case bodies and params, the `X-Workspace-Id` header, the
+ * `{ data, meta }` collection envelope. The camel↔snake conversion happens
+ * here and in the route layer, and nowhere else — components stay camelCase,
+ * the wire stays spec-shaped, and "the published spec is the app's own API"
+ * stays a testable claim rather than an aspiration.
  */
 
 import type { Item } from '@/server/db/schema/items';
-import type { ChangeSet, ChangeOperation, SampleEntry } from '@/server/db/schema/changeSets';
+import type { Tree, TreeNode } from '@/server/db/schema/trees';
+import type { ChangeOperation, ChangeSetStatus, ChangeSummary, SampleEntry } from '@/server/db/schema/changeSets';
 import type { Field, FieldGroup, ItemType } from '@/server/db/schema/itemTypes';
 import type { ErrorCode } from '@/server/lib/errors';
 import type { FilterGroup, SortSpec } from '@/types/filters';
+import { fromWire, toWire } from '@/lib/wire';
 
 export class ApiError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
-  readonly details?: unknown;
+  readonly details?: Record<string, unknown>;
   readonly requestId?: string;
 
-  constructor(status: number, body: { error: { code: ErrorCode; message: string; details?: unknown; requestId?: string } }) {
+  constructor(
+    status: number,
+    body: {
+      error: {
+        code: ErrorCode;
+        message: string;
+        details?: Record<string, unknown>;
+        request_id?: string;
+      };
+    },
+  ) {
     super(body.error.message);
     this.name = 'ApiError';
     this.code = body.error.code;
     this.status = status;
     this.details = body.error.details;
-    this.requestId = body.error.requestId;
+    this.requestId = body.error.request_id;
   }
 }
 
 export interface ItemTypeWithSchema extends ItemType {
   fields: Field[];
-  groups: FieldGroup[];
+  fieldGroups: FieldGroup[];
 }
 
-export interface ListItemsResult {
-  items: Item[];
-  nextCursor: string | null;
+export interface CollectionMeta {
+  cursor: string | null;
+  hasMore: boolean;
   total: number | null;
 }
 
-export interface ChangeSetResult {
-  changeSet: ChangeSet;
-  requiresAsyncCommit: boolean;
+export interface Collection<T> {
+  data: T[];
+  meta: CollectionMeta;
+}
+
+/** `GET /items/:id` with expansions — the detail panel's shape. */
+export interface ItemDetail extends Item {
+  itemType?: ItemType | null;
+  parent?: Item | null;
+  ancestors?: Array<{ id: string; title: string }>;
+  children?: Array<{ id: string; title: string; completenessPct: number }>;
+  variants?: Array<{ id: string; title: string; variantAxisValues: Record<string, string> | null }>;
+  treeNodes?: Array<{ id: string; label: string; treeId: string }>;
+  variantInfo?: {
+    variantParentId: string;
+    variantParentTitle: string | null;
+    axisValues: Record<string, string>;
+    inheritedFields: string[];
+    overriddenFields: string[];
+    propagating: boolean;
+  };
+  meta?: { changeSetId: string | null };
+}
+
+/** One row of the activity feed (`GET /change-sets`). */
+export interface ActivityEntry {
+  id: string;
+  operation: ChangeOperation;
+  status: ChangeSetStatus;
+  source: string;
+  actorId: string | null;
+  actorName: string | null;
+  itemCount: number;
+  skippedCount: number;
+  summary: ChangeSummary;
+  committedAt: string | null;
+  undoneByChangeSetId: string | null;
+  createdAt: string;
+}
+
+/** The §5 change-set wire shape, camelCased by the client boundary. */
+export interface ChangeSetWire {
+  id: string;
+  status: ChangeSetStatus;
+  operation: ChangeOperation;
+  itemCount: number;
+  skippedCount: number;
+  skipped: Array<{ itemId: string | null; reason: string }>;
+  summary: ChangeSummary;
+  samples: SampleEntry[];
+  expiresAt: string | null;
+  committedAt: string | null;
+  undoAvailableUntil: string | null;
+  requiresAsyncCommit?: boolean;
   committed?: boolean;
   appliedCount?: number;
-  skippedCount?: number;
   variantsPropagated?: number;
   message?: string;
+  entries?: SampleEntry[];
+  truncated?: boolean;
 }
 
 interface RequestOptions {
@@ -58,33 +124,22 @@ interface RequestOptions {
   idempotencyKey?: string;
 }
 
-let workspaceSlug: string | null = null;
+let workspaceId: string | null = null;
 
-/** Set once by the workspace shell so callers do not thread the slug through. */
-export function setWorkspaceSlug(slug: string): void {
-  workspaceSlug = slug;
+/** Set once by the workspace shell so callers do not thread the id through. */
+export function setWorkspaceId(id: string): void {
+  workspaceId = id;
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  // `URL` needs an absolute base to parse a relative path. The base is only
-  // ever a parsing scaffold — the request goes out same-origin using
-  // `pathname + search`. Stripping the base by string replacement instead
-  // silently mangles the URL whenever the real origin happens to share its
-  // prefix, which is every local development session.
-  const parseBase =
-    typeof window === 'undefined' ? 'http://strata.invalid' : window.location.origin;
-  const url = new URL(path, parseBase);
-  if (workspaceSlug && !url.searchParams.has('workspace')) {
-    url.searchParams.set('workspace', workspaceSlug);
-  }
-
   const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (workspaceId) headers['x-workspace-id'] = workspaceId;
   if (options.idempotencyKey) headers['idempotency-key'] = options.idempotencyKey;
 
-  const response = await fetch(`${url.pathname}${url.search}`, {
+  const response = await fetch(path, {
     method: options.method ?? 'GET',
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body: options.body === undefined ? undefined : JSON.stringify(toWire(options.body)),
     signal: options.signal,
     credentials: 'same-origin',
   });
@@ -95,55 +150,209 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (!response.ok) {
     throw new ApiError(
       response.status,
-      parsed as { error: { code: ErrorCode; message: string; details?: unknown; requestId?: string } },
+      parsed as ConstructorParameters<typeof ApiError>[1],
     );
   }
-  return parsed as T;
+  return fromWire(parsed) as T;
+}
+
+/** Multipart variant — the browser sets the boundary content-type itself. */
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (workspaceId) headers['x-workspace-id'] = workspaceId;
+
+  const response = await fetch(path, {
+    method: 'POST',
+    headers,
+    body: form,
+    credentials: 'same-origin',
+  });
+  const text = await response.text();
+  const parsed: unknown = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    throw new ApiError(response.status, parsed as ConstructorParameters<typeof ApiError>[1]);
+  }
+  return fromWire(parsed) as T;
 }
 
 export interface ListItemsParams {
-  itemType?: string;
+  itemTypeId?: string;
   filter?: FilterGroup;
   sort?: SortSpec[];
-  search?: string;
-  under?: string;
-  treeNode?: string;
-  treeIncludeDescendants?: boolean;
-  incompleteOnly?: boolean;
+  q?: string;
+  fields?: string[];
+  expand?: string[];
+  parentId?: string;
+  inSubtree?: string;
+  treeNodeId?: string;
+  includeDescendants?: boolean;
+  variantParentId?: string;
   includeVariants?: boolean;
+  incompleteOnly?: boolean;
   limit?: number;
   cursor?: string;
-  withTotal?: boolean;
 }
 
+/** Spec-named query params (§4): snake_case keys, `sort` as `key:dir,key:dir`. */
 function toQuery(params: ListItemsParams): string {
   const search = new URLSearchParams();
-  if (params.itemType) search.set('itemType', params.itemType);
+  if (params.itemTypeId) search.set('item_type_id', params.itemTypeId);
   if (params.filter) search.set('filter', JSON.stringify(params.filter));
-  if (params.sort?.length) search.set('sort', JSON.stringify(params.sort));
-  if (params.search) search.set('search', params.search);
-  if (params.under) search.set('under', params.under);
-  if (params.treeNode) search.set('treeNode', params.treeNode);
-  if (params.treeIncludeDescendants) search.set('treeIncludeDescendants', 'true');
-  if (params.incompleteOnly) search.set('incompleteOnly', 'true');
-  if (params.includeVariants) search.set('includeVariants', 'true');
+  if (params.sort?.length) {
+    search.set('sort', params.sort.map((s) => `${s.field}:${s.direction}`).join(','));
+  }
+  if (params.q) search.set('q', params.q);
+  if (params.fields?.length) search.set('fields', params.fields.join(','));
+  if (params.expand?.length) search.set('expand', params.expand.join(','));
+  if (params.parentId) search.set('parent_id', params.parentId);
+  if (params.inSubtree) search.set('in_subtree', params.inSubtree);
+  if (params.treeNodeId) search.set('tree_node_id', params.treeNodeId);
+  if (params.includeDescendants !== undefined) {
+    search.set('include_descendants', String(params.includeDescendants));
+  }
+  if (params.variantParentId) search.set('variant_parent_id', params.variantParentId);
+  if (params.includeVariants !== undefined) {
+    search.set('include_variants', String(params.includeVariants));
+  }
+  if (params.incompleteOnly) search.set('incomplete_only', 'true');
   if (params.limit) search.set('limit', String(params.limit));
   if (params.cursor) search.set('cursor', params.cursor);
-  if (params.withTotal) search.set('withTotal', 'true');
   return search.toString();
 }
 
 export const api = {
   itemTypes: {
     list: (signal?: AbortSignal) =>
-      request<{ itemTypes: ItemTypeWithSchema[] }>('/api/v1/item-types', { signal }),
-    create: (body: { name: string; presetKey?: string; key?: string; description?: string }) =>
-      request<{ itemType: ItemTypeWithSchema }>('/api/v1/item-types', { method: 'POST', body }),
+      request<Collection<ItemTypeWithSchema>>(
+        '/api/v1/item-types?expand=fields,field_groups',
+        { signal },
+      ),
+    create: (body: { label: string; preset?: string; key?: string; description?: string }) =>
+      request<ItemTypeWithSchema>('/api/v1/item-types', { method: 'POST', body }),
   },
 
   items: {
     list: (params: ListItemsParams, signal?: AbortSignal) =>
-      request<ListItemsResult>(`/api/v1/items?${toQuery(params)}`, { signal }),
+      request<Collection<Item>>(`/api/v1/items?${toQuery(params)}`, { signal }),
+
+    get: (id: string, expand?: string[], signal?: AbortSignal) =>
+      request<ItemDetail>(
+        `/api/v1/items/${id}${expand?.length ? `?expand=${expand.join(',')}` : ''}`,
+        { signal },
+      ),
+
+    patch: (
+      id: string,
+      body: {
+        title?: string;
+        values?: Record<string, unknown>;
+        revertFields?: string[];
+        parentId?: string | null;
+      },
+    ) => request<ItemDetail>(`/api/v1/items/${id}`, { method: 'PATCH', body }),
+
+    generateVariants: (
+      id: string,
+      body: { axisValues: Record<string, string[]>; preview: boolean },
+    ) =>
+      request<
+        ChangeSetWire & {
+          committed?: boolean;
+          generation: { adding: number; skippedExisting: number; existingCount: number };
+        }
+      >(`/api/v1/items/${id}/generate-variants`, { method: 'POST', body }),
+  },
+
+  trees: {
+    list: (signal?: AbortSignal) =>
+      request<Collection<Tree & { nodeCount: number }>>('/api/v1/trees', { signal }),
+
+    create: (body: { label: string; description?: string }) =>
+      request<Tree>('/api/v1/trees', { method: 'POST', body }),
+
+    rename: (id: string, label: string) =>
+      request<Tree>(`/api/v1/trees/${id}`, { method: 'PATCH', body: { label } }),
+
+    nodes: (treeId: string, signal?: AbortSignal) =>
+      request<Collection<TreeNode & { childCount: number; descendantItemCount: number }>>(
+        `/api/v1/trees/${treeId}/nodes`,
+        { signal },
+      ),
+
+    createNode: (treeId: string, body: { label: string; parentId?: string | null }) =>
+      request<TreeNode>(`/api/v1/trees/${treeId}/nodes`, { method: 'POST', body }),
+
+    patchNode: (
+      nodeId: string,
+      body: { label?: string; parentId?: string | null; beforeNodeId?: string | null },
+    ) => request<TreeNode>(`/api/v1/tree-nodes/${nodeId}`, { method: 'PATCH', body }),
+
+    deleteNode: (
+      nodeId: string,
+      onMembers?: 'unassign' | 'move_to_parent' | 'move_to',
+      targetNodeId?: string,
+    ) => {
+      const search = new URLSearchParams();
+      if (onMembers) search.set('on_members', onMembers);
+      if (targetNodeId) search.set('target_node_id', targetNodeId);
+      const qs = search.toString();
+      return request<{ deleted: true; movedMembers: number; unassignedMembers: number }>(
+        `/api/v1/tree-nodes/${nodeId}${qs ? `?${qs}` : ''}`,
+        { method: 'DELETE' },
+      );
+    },
+
+    assignItems: (nodeId: string, itemIds: string[]) =>
+      request<ChangeSetWire>(`/api/v1/tree-nodes/${nodeId}/items`, {
+        method: 'POST',
+        body: { itemIds, autoCommit: true },
+      }),
+
+    unassignItems: (nodeId: string, itemIds: string[]) =>
+      request<ChangeSetWire>(`/api/v1/tree-nodes/${nodeId}/items`, {
+        method: 'DELETE',
+        body: { itemIds, autoCommit: true },
+      }),
+  },
+
+  activity: {
+    list: (
+      params: {
+        itemId?: string;
+        actorId?: string;
+        operation?: string;
+        limit?: number;
+        cursor?: string;
+      },
+      signal?: AbortSignal,
+    ) => {
+      const search = new URLSearchParams();
+      if (params.itemId) search.set('item_id', params.itemId);
+      if (params.actorId) search.set('actor_id', params.actorId);
+      if (params.operation) search.set('operation', params.operation);
+      if (params.limit) search.set('limit', String(params.limit));
+      if (params.cursor) search.set('cursor', params.cursor);
+      return request<Collection<ActivityEntry>>(`/api/v1/change-sets?${search.toString()}`, {
+        signal,
+      });
+    },
+  },
+
+  notifications: {
+    list: (params: { unreadOnly?: boolean; limit?: number } = {}, signal?: AbortSignal) => {
+      const search = new URLSearchParams();
+      if (params.unreadOnly) search.set('unread_only', 'true');
+      if (params.limit) search.set('limit', String(params.limit));
+      return request<Collection<NotificationWire> & { unreadCount: number }>(
+        `/api/v1/notifications?${search.toString()}`,
+        { signal },
+      );
+    },
+    markRead: (target: { ids: string[] } | { all: true }) =>
+      request<{ markedRead: number }>('/api/v1/notifications/read', {
+        method: 'POST',
+        body: target,
+      }),
   },
 
   changeSets: {
@@ -158,32 +367,202 @@ export const api = {
       },
       idempotencyKey?: string,
     ) =>
-      request<ChangeSetResult>('/api/v1/change-sets', {
+      request<ChangeSetWire>('/api/v1/change-sets', {
         method: 'POST',
         body,
         idempotencyKey,
       }),
 
     get: (id: string, entries: 'sample' | 'all' = 'sample') =>
-      request<{ changeSet: ChangeSet; entries: SampleEntry[]; truncated: boolean }>(
+      request<ChangeSetWire>(
         `/api/v1/change-sets/${id}${entries === 'all' ? '?entries=all' : ''}`,
       ),
 
     commit: (id: string, idempotencyKey?: string) =>
-      request<{
-        changeSet: ChangeSet;
-        appliedCount: number;
-        skippedCount: number;
-        variantsPropagated: number;
-      }>(`/api/v1/change-sets/${id}/commit`, { method: 'POST', idempotencyKey }),
+      request<ChangeSetWire>(`/api/v1/change-sets/${id}/commit`, {
+        method: 'POST',
+        idempotencyKey,
+      }),
 
     undo: (id: string) =>
-      request<{ changeSet: ChangeSet; restoredCount: number }>(
-        `/api/v1/change-sets/${id}/undo`,
-        { method: 'POST' },
-      ),
+      request<{
+        undoChangeSetId: string;
+        originalChangeSetId: string;
+        status: ChangeSetStatus;
+        itemCount: number;
+        restored: number;
+        variantsPropagated: number;
+      }>(`/api/v1/change-sets/${id}/undo`, { method: 'POST' }),
 
     discard: (id: string) =>
       request<{ discarded: true }>(`/api/v1/change-sets/${id}`, { method: 'DELETE' }),
   },
+
+  views: {
+    list: (itemTypeId?: string, signal?: AbortSignal) =>
+      request<Collection<ViewWire>>(
+        `/api/v1/views${itemTypeId ? `?item_type_id=${itemTypeId}` : ''}`,
+        { signal },
+      ),
+    create: (body: {
+      itemTypeId: string;
+      name: string;
+      type?: 'grid' | 'list' | 'board';
+      visibility?: 'private' | 'workspace' | 'shared';
+      config?: ViewConfigWire;
+    }) => request<ViewWire>('/api/v1/views', { method: 'POST', body }),
+    update: (
+      id: string,
+      body: {
+        name?: string;
+        visibility?: 'private' | 'workspace' | 'shared';
+        config?: ViewConfigWire;
+      },
+    ) => request<ViewWire>(`/api/v1/views/${id}`, { method: 'PATCH', body }),
+    delete: (id: string) =>
+      request<{ deleted: true }>(`/api/v1/views/${id}`, { method: 'DELETE' }),
+  },
+
+  imports: {
+    create: (file: File, itemTypeId: string, profileId?: string) => {
+      const form = new FormData();
+      form.set('file', file);
+      form.set('item_type_id', itemTypeId);
+      if (profileId) form.set('import_profile_id', profileId);
+      return requestForm<ImportJobWire>('/api/v1/imports', form);
+    },
+
+    get: (id: string, signal?: AbortSignal) =>
+      request<ImportJobWire>(`/api/v1/imports/${id}`, { signal }),
+
+    setMapping: (
+      id: string,
+      body: {
+        mapping: Record<string, string>;
+        matchKey?: string | null;
+        options?: { hasHeaderRow?: boolean; onMatch?: 'update' | 'skip' };
+        saveAsProfile?: string;
+      },
+    ) => request<ImportJobWire>(`/api/v1/imports/${id}/mapping`, { method: 'PATCH', body }),
+
+    commit: (id: string) =>
+      request<ImportJobWire>(`/api/v1/imports/${id}/commit`, { method: 'POST' }),
+  },
+
+  importProfiles: {
+    list: (itemTypeId?: string, signal?: AbortSignal) =>
+      request<Collection<ImportProfileWire>>(
+        `/api/v1/import-profiles${itemTypeId ? `?item_type_id=${itemTypeId}` : ''}`,
+        { signal },
+      ),
+    delete: (id: string) =>
+      request<{ deleted: true }>(`/api/v1/import-profiles/${id}`, { method: 'DELETE' }),
+  },
+
+  exports: {
+    create: (body: {
+      itemTypeId: string;
+      filter?: FilterGroup;
+      sort?: SortSpec[];
+      search?: string;
+      incompleteOnly?: boolean;
+      visibleFieldKeys?: string[];
+    }) =>
+      request<{
+        id: string;
+        status: string;
+        rowCount: number;
+        downloadUrl: string;
+        expiresAt: string | null;
+      }>('/api/v1/exports', { method: 'POST', body }),
+  },
 };
+
+export interface ImportColumnSuggestion {
+  index: number;
+  name: string;
+  samples: string[];
+  suggestedFieldKey: string | null;
+  confidence: number;
+}
+
+export interface ImportJobWire {
+  id: string;
+  status: string;
+  itemTypeId: string;
+  profileId: string | null;
+  fileName: string;
+  rowCount: number;
+  mapping: Record<string, string>;
+  matchKey: string | null;
+  options: { hasHeaderRow?: boolean; onMatch?: 'update' | 'skip' };
+  detectedHeaders: string[] | null;
+  previewRows: string[][] | null;
+  validCount: number;
+  errorCount: number;
+  warningCount: number;
+  willCreate: number;
+  willUpdate: number;
+  report: {
+    rowCount: number;
+    newCount: number;
+    matchedCount: number;
+    columns: Array<{
+      header: string;
+      fieldKey: string | null;
+      coerced: number;
+      invalid: number;
+      empty: number;
+      samples: string[];
+    }>;
+    errors: Array<{ row: number; column: string; value: string; message: string }>;
+  } | null;
+  errorFileUrl: string | null;
+  changeSetId: string | null;
+  detectedColumns?: ImportColumnSuggestion[];
+  appliedCount?: number;
+  skippedCount?: number;
+}
+
+export interface ImportProfileWire {
+  id: string;
+  itemTypeId: string;
+  name: string;
+  mapping: Record<string, string>;
+  matchKey: string | null;
+}
+
+export interface NotificationWire {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  href: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface ViewConfigWire {
+  filter?: FilterGroup;
+  sort?: SortSpec[];
+  search?: string;
+  incompleteOnly?: boolean;
+  visibleFieldKeys?: string[];
+  columnWidths?: Record<string, number>;
+  pinnedFieldKeys?: string[];
+  boardGroupFieldKey?: string;
+}
+
+export interface ViewWire {
+  id: string;
+  itemTypeId: string;
+  type: 'grid' | 'list' | 'board';
+  name: string;
+  description: string | null;
+  visibility: 'private' | 'workspace' | 'shared';
+  config: ViewConfigWire;
+  isDefault: boolean;
+  ownerId: string | null;
+  shareToken: string | null;
+  shareUrl: string | null;
+}

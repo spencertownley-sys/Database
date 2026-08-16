@@ -3,6 +3,13 @@
 **Date:** 2026-08-15
 **Status of the build at the time of writing:** commit `a5b86f0`, branch `claude/strata-platform-9htu5e`
 
+> **RESOLVED — 2026-08-15, branch `claude/strata-spec-reconciliation-f0ku1c`.**
+> Every item in §1–§5.2 has been fixed in the §7 order, verified against the
+> live app, and committed with the three Tech Spec §8 tests passing throughout.
+> §8 at the bottom of this document records the resolution, including the two
+> divergences that were resolved by deliberate decision rather than by
+> matching the spec letter-for-letter.
+
 ---
 
 ## Why this document exists
@@ -311,3 +318,58 @@ Worth recording so it does not get rewritten:
 
 A full restart is not necessary and would discard the isolation, undo, and projection work, which is
 the part that took the longest to get right and is the part the launch checklist marks 🔒 BLOCKER.
+
+---
+
+## 8. Resolution record
+
+Fixed in the §7 order on `claude/strata-spec-reconciliation-f0ku1c`, one commit per section, with
+typecheck, lint, the full test suite (154, up from 116), and `next build` green at every commit.
+The isolation, undo-fidelity, and projection-consistency tests were never red.
+
+| Item | Resolution |
+|---|---|
+| §1.1 variant semantics | Rewritten from §2.5: `shared` = model's value, read-only on variants (`FIELD_READ_ONLY` on a single-item write, skip-with-reason in bulk); `variant` = inherit-until-overridden by key presence; axis pass added; schema default flipped to `'variant'`. New unit + property suites pin every arm. |
+| §1.2 completeness | Filled-required ÷ total-required only. `counts_toward_completeness` dropped, `required` → `required_for_completeness`, title out of the denominator. |
+| §1.3 auto-index | Filter/sort on a non-indexed field → `400 FIELD_NOT_FILTERABLE` with `details.action`; indexing happens on the explicit `PATCH` (with backfill); `select`/`multi_select`/`date`/`datetime`/`user`/`checkbox` always-on indexed and backfilled by migration. |
+| §2 wire format | snake_case bodies/params converted once at the route boundary (user-keyed bags untouched), `{data, meta}` envelope with `total` null past 10k, `X-Workspace-Id` header + `WORKSPACE_REQUIRED`, `request_id`, §10 error-code table verbatim, `sk_live_` keys with §9 scopes, §1.0 health shape, `expand=`/`fields=`, §4.1 `op`/`children` filter grammar, §4 param names and `sort=key:dir`. |
+| §2.10 roles | `editor` → `member` via `ALTER TYPE … RENAME VALUE`; matrix and messages follow. |
+| §3 data model | All renames applied in one data-preserving migration; `items.depth` (maintained on write and reparent), `trees.position`, `items_values_gin`, `items_keyset_idx`, workspace-led projection indexes, `citext` email, bigserial `change_entries` PK, `RESTRICT` on both `parent_id` FKs. |
+| §3.1 change entries | **Deliberate decision:** entries stay whole-item snapshots internally (undo is a swap, and the byte-identical undo test depends on it); `GET /change-sets/:id/entries` derives the published per-item, per-field rows at read time. |
+| §4 limits | 20 clauses / depth 4 (`FILTER_TOO_COMPLEX`), 3 sort keys, 10k target (`TARGET_TOO_LARGE`), 1h preview (`PREVIEW_EXPIRED`), 24h undo window (`UNDO_WINDOW_EXPIRED`), 60s undo toast with a draining line. |
+| §5.1 key map | `Ctrl/⌘+Enter`, `Space`, `/`, `Ctrl/⌘+K` added; paste offers to create overflow rows and previews non-convertible values before committing; multi-set gestures undo as one step. |
+| §5.2 tokens | §2 hex palette, 13px grid body, 32/40/56 row heights, tabular-nums across the grid, four-stop completeness ramp. |
+| §5.3 presets | Campaign ships Region with variants pre-enabled; Product Variant gains Category/Status alongside its two axes; Record type / Reference ID / Owner / Due date labels; Blank is Title-only. |
+| Step 8 | List view (hierarchy + variant nesting, inline title edit), board view (option-ordered columns, drag-between-columns via change sets, shared undo toast), item detail panel (field groups, click-to-focus missing links, breadcrumb, tree chips, variant banner with two-channel inherited/overridden marking, revert, activity feed), deep link at `/w/:slug/items/:id`, plus `GET/PATCH/DELETE /items/:id` and `GET /change-sets`. |
+
+**The one deviation kept, on purpose:** `position` is the spec's column name but remains a
+*fractional string* rather than `numeric`. The string form never needs rebalancing, sorts with plain
+collation, and serialises as an opaque ordering token; `numeric` buys nothing but midpoint
+arithmetic and a rebalancing failure mode. Every document's *uses* of `position` (sibling ordering,
+drag) behave identically.
+
+**Steps 9–15 are now built** — tree manager with dispositions and rollups, guided variant
+generation as one change set (with the model flip riding the same set), CSV import/export with the
+one-change-set commit and the 5,000-row round-trip test, saved views + `/share/[token]` behind an
+`app_resolve_share_token` SECURITY DEFINER lookup, guest-scoped listings, the activity page,
+the notification centre, webhook delivery with §12 signing and the 20-failure auto-disable,
+`/api/openapi` with a coverage test that fails the build on route/spec drift, the ⌘K palette,
+concept hints, error pages, and the 100k perf fixture with the §6.1 budget + EXPLAIN gates
+(`npm run test:perf`).
+
+**Deliberate adaptations to this build's environment** (no Supabase/Inngest/Resend/Vercel
+accounts): background jobs run synchronously with the same states and wire shapes (bulk >500
+still previews and reports `requires_async_commit`; imports/exports/webhook delivery are
+sync best-effort, with webhook retries recorded on the §12 schedule for a future runner);
+file storage is a local-disk stand-in behind `src/server/lib/storage.ts` with HMAC-signed
+download tokens standing in for signed Storage URLs; imports are CSV-only (no XLSX parser is
+carried — the upload error says so and names the Excel export path) and capped at 10k rows so
+one change set can hold the commit; email delivery is absent (`notifications.emailed_at` stays
+null); Step 16 is a GitHub Actions pipeline (`.github/workflows/ci.yml`) enforcing typecheck,
+lint, the full suite against real Postgres 16 with RLS, the §6.1 perf gates, migrations from an
+empty database, and the production build — the Vercel/Supabase deploy stages need accounts the
+repository does not carry.
+
+**Still open:** the Item Type builder screen (types are created from presets via API/seed today),
+XLSX import, drag-to-node assignment from the grid, Playwright E2E + axe in CI, and the §9.2
+deploy stages.

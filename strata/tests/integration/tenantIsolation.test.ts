@@ -197,7 +197,7 @@ describe('writes', () => {
 
       try {
         await tx.execute(sql`
-          insert into items (workspace_id, item_type_id, title, path, order_key)
+          insert into items (workspace_id, item_type_id, title, path, position)
           values (${partners}, ${type?.id ?? null}, 'smuggled', 'aaaaaaaa_0000_4000_8000_000000000000', 'a0')
         `);
         return null;

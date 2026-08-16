@@ -44,7 +44,13 @@ export interface EditState {
 
 /** One entry on the local stack, mapping to a committed change set. */
 export interface UndoEntry {
-  changeSetId: string;
+  /**
+   * One user gesture can commit several change sets (a paste of distinct
+   * values is one set per distinct patch). Undo reverses them together, in
+   * reverse commit order — a paste that undoes only its last slice is worse
+   * than no undo.
+   */
+  changeSetIds: string[];
   label: string;
   itemCount: number;
   at: number;

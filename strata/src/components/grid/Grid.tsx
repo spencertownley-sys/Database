@@ -45,7 +45,8 @@ import { fillDownTargets, fillHandleTargets } from './useGridFill';
 import { describeOperation, useGridUndo } from './useGridUndo';
 import type { WorkspaceMemberOption } from './editors/UserEditor';
 
-const ROW_HEIGHT = 34;
+/** UI/UX §2 medium row height. */
+const ROW_HEIGHT = 40;
 const LEADING_WIDTH = 260;
 const OVERSCAN = 12;
 const DEFAULT_COLUMN_WIDTH = 160;
@@ -64,6 +65,10 @@ export interface GridProps {
   onPinnedChange: (keys: string[]) => void;
   onFieldOrderChange: (keys: string[]) => void;
   onOpenDetail: (itemId: string) => void;
+  /** `/` — the workspace focuses its filter bar. */
+  onFocusFilter?: () => void;
+  /** Ctrl/Cmd+K — the workspace opens its command affordance. */
+  onCommandPalette?: () => void;
   onDataChanged: () => void;
   onToast: (toast: { message: string; undo?: () => void; tone?: 'info' | 'error' }) => void;
   /** Guests may only edit the fields granted to them; null means all. */
@@ -148,6 +153,7 @@ export function Grid(props: GridProps) {
     async (
       targets: Array<{ row: number; col: number; value: unknown }>,
       operationLabel: string,
+      opts?: { confirmInvalid?: boolean },
     ): Promise<void> => {
       if (targets.length === 0) return;
 
@@ -182,8 +188,15 @@ export function Grid(props: GridProps) {
       useGridStore.getState().markPending(rowIds);
 
       try {
-        let lastChangeSetId: string | null = null;
+        const committedIds: string[] = [];
         let totalItems = 0;
+
+        // Paste previews before committing (UI/UX §5.1): every group is
+        // created as a preview first, invalid counts are summed across them,
+        // and the user confirms before anything lands.
+        const preview = opts?.confirmInvalid === true;
+        const pendingPreviews: Array<{ id: string; itemCount: number }> = [];
+        let invalidCount = 0;
 
         for (const group of groups.values()) {
           const result = await api.changeSets.create({
@@ -191,11 +204,16 @@ export function Grid(props: GridProps) {
             itemTypeId: props.itemTypeId,
             target: { kind: 'ids', itemIds: group.itemIds },
             patch: { values: { [group.fieldKey]: group.value } },
-            autoCommit: true,
+            autoCommit: !preview,
           });
 
-          if (result.committed) {
-            lastChangeSetId = result.changeSet.id;
+          if (preview) {
+            pendingPreviews.push({ id: result.id, itemCount: result.itemCount });
+            for (const bucket of Object.values(result.summary.byField ?? {})) {
+              invalidCount += bucket.invalid ?? 0;
+            }
+          } else if (result.committed) {
+            committedIds.push(result.id);
             totalItems += result.appliedCount ?? group.itemIds.length;
           } else {
             // Above the bulk threshold the server refuses to auto-commit; the
@@ -207,9 +225,28 @@ export function Grid(props: GridProps) {
           }
         }
 
-        if (lastChangeSetId) {
+        if (preview) {
+          const proceed =
+            invalidCount === 0 ||
+            window.confirm(
+              `${invalidCount} pasted value${invalidCount === 1 ? '' : 's'} won't convert to the column's type and will be flagged instead of stored. Paste anyway?`,
+            );
+          for (const pending of pendingPreviews) {
+            if (proceed) {
+              await api.changeSets.commit(pending.id);
+              committedIds.push(pending.id);
+              totalItems += pending.itemCount;
+            } else {
+              await api.changeSets.discard(pending.id);
+            }
+          }
+          if (!proceed) return; // `finally` clears the pending markers
+
+        }
+
+        if (committedIds.length > 0) {
           undoController.record({
-            changeSetId: lastChangeSetId,
+            changeSetIds: committedIds,
             label: operationLabel,
             itemCount: totalItems,
           });
@@ -372,19 +409,58 @@ export function Grid(props: GridProps) {
     if (!selection) return;
     const rect = normaliseRect(selection);
 
-    void clipboard.read().then((matrix) => {
+    void clipboard.read().then(async (matrix) => {
       const targets = mapPasteToTargets(matrix, rect, bounds);
-      if (targets.length === 0) return;
 
-      // Above the auto-commit threshold the server returns a preview instead
-      // of applying, and `writeCells` surfaces that rather than pretending the
-      // paste landed.
+      // §5.1: pasting more rows than exist offers to create the extra items
+      // rather than silently truncating.
+      const overflowRows = matrix.length - (bounds.rows - rect.top);
+      if (overflowRows > 0) {
+        const create = window.confirm(
+          `The pasted block has ${overflowRows} more row${overflowRows === 1 ? '' : 's'} than the grid. Create ${overflowRows === 1 ? 'a new item' : `${overflowRows} new items`} for them?`,
+        );
+        if (create) {
+          const overflow = matrix.slice(matrix.length - overflowRows);
+          const drafts = overflow.map((cells) => {
+            const values: Record<string, unknown> = {};
+            cells.forEach((value, i) => {
+              const field = columns[rect.left + i]?.field;
+              if (field && value !== '') values[field.key] = value;
+            });
+            return { title: '', values };
+          });
+          try {
+            const result = await api.changeSets.create({
+              operation: 'create',
+              itemTypeId: props.itemTypeId,
+              target: { kind: 'new', drafts },
+              autoCommit: true,
+            });
+            undoController.record({
+              changeSetIds: [result.id],
+              label: 'Paste (new items)',
+              itemCount: drafts.length,
+            });
+          } catch {
+            props.onToast({ message: 'Could not create the extra rows.', tone: 'error' });
+          }
+        }
+      }
+
+      if (targets.length === 0) {
+        props.onDataChanged();
+        return;
+      }
+
+      // Paste previews non-convertible values before committing (§5.1);
+      // `writeCells` sums the invalid counts across its previews and asks.
       void writeCells(
         targets.map((t) => ({ row: t.row, col: t.col, value: t.value })),
         'Paste',
+        { confirmInvalid: targets.length > 1 },
       );
     });
-  }, [bounds, clipboard, writeCells]);
+  }, [bounds, clipboard, columns, props, undoController, writeCells]);
 
   const handleFillDown = useCallback(() => {
     const selection = useGridStore.getState().selection;
@@ -424,6 +500,24 @@ export function Grid(props: GridProps) {
     onFillDown: handleFillDown,
     onUndo: handleUndo,
     onRedo: handleRedo,
+    onOpenDetail: () => {
+      const focus = useGridStore.getState().selection?.focus;
+      const item = focus ? props.items[focus.row] : undefined;
+      if (item) props.onOpenDetail(item.id);
+    },
+    onSpace: () => {
+      // Space toggles a checkbox cell (UI/UX 5.1); on any other type it is
+      // deliberately inert rather than clearing or editing the value.
+      const focus = useGridStore.getState().selection?.focus;
+      if (!focus) return;
+      const item = props.items[focus.row];
+      const field = columns[focus.col]?.field;
+      if (!item || !field || field.type !== 'checkbox') return;
+      const current = item.effectiveValues[field.key] === true;
+      void writeCells([{ row: focus.row, col: focus.col, value: !current }], 'Toggle');
+    },
+    onFocusFilter: () => props.onFocusFilter?.(),
+    onCommandPalette: () => props.onCommandPalette?.(),
   });
 
   const totalWidth = LEADING_WIDTH + columns.reduce((sum, c) => sum + c.width, 0);
@@ -433,7 +527,7 @@ export function Grid(props: GridProps) {
     <div className="flex h-full flex-col">
       <div
         ref={scrollRef}
-        className="scrollbar-thin relative flex-1 overflow-auto bg-[var(--color-surface)]"
+        className="grid-surface scrollbar-thin relative flex-1 overflow-auto bg-[var(--color-surface)]"
         role="grid"
         aria-rowcount={props.items.length + 1}
         aria-colcount={columns.length + 1}

@@ -21,6 +21,10 @@
  *   Ctrl/Cmd+C / V / X      copy / paste / cut
  *   Ctrl/Cmd+D              fill down
  *   Ctrl/Cmd+Z              undo   ·   Ctrl/Cmd+Shift+Z  redo
+ *   Ctrl/Cmd+Enter          open the selected row's detail panel
+ *   Space                   toggle a checkbox cell
+ *   /                       focus the filter bar
+ *   Ctrl/Cmd+K              command palette
  */
 
 import { useEffect } from 'react';
@@ -38,6 +42,14 @@ export interface GridKeyboardHandlers {
   onFillDown: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  /** Ctrl/Cmd+Enter — the focused row's detail panel (UI/UX §5.1). */
+  onOpenDetail: () => void;
+  /** Space on a checkbox cell toggles it; anything else is ignored. */
+  onSpace: () => void;
+  /** `/` — focus the filter bar. */
+  onFocusFilter: () => void;
+  /** Ctrl/Cmd+K — the command palette. */
+  onCommandPalette: () => void;
   enabled: boolean;
 }
 
@@ -60,6 +72,10 @@ export function useGridKeyboard(handlers: GridKeyboardHandlers): void {
     onFillDown,
     onUndo,
     onRedo,
+    onOpenDetail,
+    onSpace,
+    onFocusFilter,
+    onCommandPalette,
     enabled,
   } = handlers;
 
@@ -87,7 +103,26 @@ export function useGridKeyboard(handlers: GridKeyboardHandlers): void {
         return;
       }
 
+      // Ctrl/Cmd+K works with or without a selection — it is navigation.
+      if (mod && (event.key === 'k' || event.key === 'K')) {
+        event.preventDefault();
+        onCommandPalette();
+        return;
+      }
+
       if (!state.selection) return;
+
+      if (event.key === '/') {
+        event.preventDefault();
+        onFocusFilter();
+        return;
+      }
+
+      if (event.key === ' ') {
+        event.preventDefault();
+        onSpace();
+        return;
+      }
 
       switch (event.key) {
         case 'ArrowUp':
@@ -139,6 +174,10 @@ export function useGridKeyboard(handlers: GridKeyboardHandlers): void {
 
         case 'Enter': {
           event.preventDefault();
+          if (mod) {
+            onOpenDetail();
+            return;
+          }
           if (event.altKey) {
             onEditStart({ replace: false });
             return;
@@ -244,5 +283,9 @@ export function useGridKeyboard(handlers: GridKeyboardHandlers): void {
     onPaste,
     onRedo,
     onUndo,
+    onOpenDetail,
+    onSpace,
+    onFocusFilter,
+    onCommandPalette,
   ]);
 }

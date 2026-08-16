@@ -2,6 +2,8 @@ import { withWorkspace } from '@/server/db';
 import { handle } from '@/server/lib/route';
 import { commitChangeSet, getChangeSet } from '@/server/services/changeSets.service';
 import { assertCan } from '@/server/services/permissions.service';
+import { shapeChangeSet } from '@/server/lib/changeSetWire';
+import { emitCommitted } from '@/server/lib/webhookEmit';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,12 +18,12 @@ export async function POST(
     async ({ context }) => {
       assertCan(context.actor, 'change_set.commit', { kind: 'change_set' });
 
-      return withWorkspace(context.workspace.id, async (tx) => {
+      const result = await withWorkspace(context.workspace.id, async (tx) => {
         // Read first so the response can say what was applied even when the
         // set is large; the service re-reads inside its own transaction.
         await getChangeSet(tx, context.workspace.id, id);
 
-        const result = await commitChangeSet(
+        return commitChangeSet(
           tx,
           {
             workspaceId: context.workspace.id,
@@ -30,14 +32,19 @@ export async function POST(
           },
           id,
         );
-
-        return {
-          changeSet: result.changeSet,
-          appliedCount: result.appliedCount,
-          skippedCount: result.skippedCount,
-          variantsPropagated: result.variantsPropagated,
-        };
       });
+
+      // After the transaction, never inside it.
+      emitCommitted(context.workspace.id, result.changeSet, {
+        appliedCount: result.appliedCount,
+      });
+
+      return {
+        ...shapeChangeSet(result.changeSet),
+        appliedCount: result.appliedCount,
+        skippedCount: result.skippedCount,
+        variantsPropagated: result.variantsPropagated,
+      };
     },
     { limit: 'bulk' },
   );

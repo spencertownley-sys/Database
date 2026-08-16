@@ -1,15 +1,100 @@
+import { and, desc, eq, exists, inArray, lt, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { withWorkspace } from '@/server/db';
-import { handle, idempotencyKeyOf, parseBody } from '@/server/lib/route';
+import { changeEntries, changeSets } from '@/server/db/schema/changeSets';
+import { users } from '@/server/db/schema/workspaces';
+import { handle, idempotencyKeyOf, parseBody, parseQuery } from '@/server/lib/route';
+import { collection } from '@/lib/wire';
 import {
   BULK_SYNC_THRESHOLD,
   commitChangeSet,
   previewChangeSet,
 } from '@/server/services/changeSets.service';
 import { assertCan } from '@/server/services/permissions.service';
+import { shapeChangeSet } from '@/server/lib/changeSetWire';
+import { emitCommitted } from '@/server/lib/webhookEmit';
 import { changeSetInputSchema } from '@/server/validation/schemas';
 import type { ChangeTarget } from '@/server/db/schema/changeSets';
 
 export const dynamic = 'force-dynamic';
+
+const listQuerySchema = z.object({
+  itemId: z.string().uuid().optional(),
+  actorId: z.string().uuid().optional(),
+  operation: z.string().max(40).optional(),
+  status: z.string().max(40).optional(),
+  cursor: z.string().max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+/**
+ * `GET /change-sets` — backs both the workspace activity feed and the
+ * per-item history (§5). `item_id` filters through `change_entries`, which is
+ * exactly what the per-item feed is: every set that touched the item.
+ */
+export async function GET(request: Request): Promise<Response> {
+  return handle(request, async ({ context }) => {
+    const query = parseQuery(request, listQuerySchema);
+
+    return withWorkspace(context.workspace.id, async (tx) => {
+      const rows = await tx
+        .select({
+          id: changeSets.id,
+          operation: changeSets.operation,
+          status: changeSets.status,
+          source: changeSets.source,
+          itemTypeId: changeSets.itemTypeId,
+          actorId: changeSets.actorId,
+          actorName: users.name,
+          itemCount: changeSets.itemCount,
+          skippedCount: changeSets.skippedCount,
+          summary: changeSets.summary,
+          committedAt: changeSets.committedAt,
+          undoneByChangeSetId: changeSets.undoneByChangeSetId,
+          createdAt: changeSets.createdAt,
+        })
+        .from(changeSets)
+        .leftJoin(users, eq(users.id, changeSets.actorId))
+        .where(
+          and(
+            eq(changeSets.workspaceId, context.workspace.id),
+            inArray(changeSets.status, ['committed', 'undone']),
+            query.actorId ? eq(changeSets.actorId, query.actorId) : undefined,
+            query.operation
+              ? sql`${changeSets.operation} = ${query.operation}`
+              : undefined,
+            query.status ? sql`${changeSets.status} = ${query.status}` : undefined,
+            query.itemId
+              ? exists(
+                  tx
+                    .select({ one: sql`1` })
+                    .from(changeEntries)
+                    .where(
+                      and(
+                        eq(changeEntries.changeSetId, changeSets.id),
+                        eq(changeEntries.itemId, query.itemId),
+                      ),
+                    ),
+                )
+              : undefined,
+            query.cursor ? lt(changeSets.createdAt, new Date(query.cursor)) : undefined,
+          ),
+        )
+        .orderBy(desc(changeSets.createdAt))
+        .limit(query.limit + 1);
+
+      const hasMore = rows.length > query.limit;
+      const page = hasMore ? rows.slice(0, query.limit) : rows;
+      const last = page[page.length - 1];
+
+      return collection(page, {
+        cursor: hasMore && last ? last.createdAt.toISOString() : null,
+        hasMore,
+        total: null,
+      });
+    });
+  });
+}
 
 /**
  * Creates a preview.
@@ -47,12 +132,12 @@ export async function POST(request: Request): Promise<Response> {
         });
 
         if (!input.autoCommit) {
-          return { changeSet, requiresAsyncCommit };
+          return { ...shapeChangeSet(changeSet), requiresAsyncCommit };
         }
 
         if (requiresAsyncCommit) {
           return {
-            changeSet,
+            ...shapeChangeSet(changeSet),
             requiresAsyncCommit,
             committed: false,
             message: `This affects ${changeSet.itemCount.toLocaleString()} items — more than the ${BULK_SYNC_THRESHOLD} that apply immediately. Review the preview and commit it.`,
@@ -60,8 +145,12 @@ export async function POST(request: Request): Promise<Response> {
         }
 
         const result = await commitChangeSet(tx, changeContext, changeSet.id);
+        emitCommitted(context.workspace.id, result.changeSet, {
+          appliedCount: result.appliedCount,
+          itemId: input.target.itemIds?.[0] ?? null,
+        });
         return {
-          changeSet: result.changeSet,
+          ...shapeChangeSet(result.changeSet),
           requiresAsyncCommit: false,
           committed: true,
           appliedCount: result.appliedCount,
@@ -70,6 +159,6 @@ export async function POST(request: Request): Promise<Response> {
         };
       });
     },
-    { limit: 'write' },
+    { limit: 'write', status: 201 },
   );
 }
