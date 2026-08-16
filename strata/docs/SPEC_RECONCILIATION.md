@@ -348,7 +348,28 @@ collation, and serialises as an opaque ordering token; `numeric` buys nothing bu
 arithmetic and a rebalancing failure mode. Every document's *uses* of `position` (sibling ordering,
 drag) behave identically.
 
-**Still open (build steps not yet reached):** Steps 9–16 — tree manager UI, guided variant
-generation UI, import/export, saved views + `/share/[token]`, activity page, notifications,
-webhooks delivery, Inngest jobs, concept-hint cards, the Item Type builder screen, perf fixture,
-deployment. §5.4's list stands for those, minus the item detail panel, list view, and board view.
+**Steps 9–15 are now built** — tree manager with dispositions and rollups, guided variant
+generation as one change set (with the model flip riding the same set), CSV import/export with the
+one-change-set commit and the 5,000-row round-trip test, saved views + `/share/[token]` behind an
+`app_resolve_share_token` SECURITY DEFINER lookup, guest-scoped listings, the activity page,
+the notification centre, webhook delivery with §12 signing and the 20-failure auto-disable,
+`/api/openapi` with a coverage test that fails the build on route/spec drift, the ⌘K palette,
+concept hints, error pages, and the 100k perf fixture with the §6.1 budget + EXPLAIN gates
+(`npm run test:perf`).
+
+**Deliberate adaptations to this build's environment** (no Supabase/Inngest/Resend/Vercel
+accounts): background jobs run synchronously with the same states and wire shapes (bulk >500
+still previews and reports `requires_async_commit`; imports/exports/webhook delivery are
+sync best-effort, with webhook retries recorded on the §12 schedule for a future runner);
+file storage is a local-disk stand-in behind `src/server/lib/storage.ts` with HMAC-signed
+download tokens standing in for signed Storage URLs; imports are CSV-only (no XLSX parser is
+carried — the upload error says so and names the Excel export path) and capped at 10k rows so
+one change set can hold the commit; email delivery is absent (`notifications.emailed_at` stays
+null); Step 16 is a GitHub Actions pipeline (`.github/workflows/ci.yml`) enforcing typecheck,
+lint, the full suite against real Postgres 16 with RLS, the §6.1 perf gates, migrations from an
+empty database, and the production build — the Vercel/Supabase deploy stages need accounts the
+repository does not carry.
+
+**Still open:** the Item Type builder screen (types are created from presets via API/seed today),
+XLSX import, drag-to-node assignment from the grid, Playwright E2E + axe in CI, and the §9.2
+deploy stages.

@@ -1,0 +1,110 @@
+# Strata CI — Tech Spec §9.2, adapted to what a runner can actually host.
+#
+# The deploy stages (Vercel, Supabase, Inngest) need provisioned accounts this
+# repository does not carry; what CI *can* enforce, it enforces completely:
+# types, lint, every unit/property/integration test against a real Postgres 16
+# (RLS included — the suite connects as the non-owner role, so the isolation
+# tests prove policies, not luck), the §6.1 performance budgets with their
+# EXPLAIN no-seq-scan gate on the 100k fixture, migrations applying from an
+# empty database, and the production build.
+
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+defaults:
+  run:
+    working-directory: strata
+
+jobs:
+  checks:
+    name: typecheck · lint · unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: strata/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit
+
+  integration:
+    name: integration (Postgres 16 + RLS)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: strata
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+    env:
+      DATABASE_URL: postgresql://strata_app:strata_app@localhost:5432/strata
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/strata
+      # The suite must run as a role that RLS applies to (CLAUDE.md: an owner
+      # connection makes every isolation test decorative).
+      CREATE_LOCAL_APP_ROLE: '1'
+      API_KEY_PEPPER: ci-only-pepper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: strata/package-lock.json
+      - run: npm ci
+      - name: Migrate from an empty database
+        run: npm run db:migrate
+      - name: Seed
+        run: npm run db:seed
+      - name: Integration suite
+        run: npm run test:integration
+      - name: Production build
+        run: npx next build
+
+  perf:
+    name: §6.1 budgets + EXPLAIN gate (100k fixture)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: strata
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://strata_app:strata_app@localhost:5432/strata
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/strata
+      CREATE_LOCAL_APP_ROLE: '1'
+      API_KEY_PEPPER: ci-only-pepper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: strata/package-lock.json
+      - run: npm ci
+      - run: npm run db:migrate
+      - name: Budgets are acceptance criteria, not aspirations
+        run: npm run test:perf
