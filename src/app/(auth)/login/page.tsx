@@ -3,11 +3,11 @@
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Ship } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LogoMark } from "@/components/brand/Logo";
 import {
   Card,
   CardContent,
@@ -38,7 +38,7 @@ function LoginForm() {
         setError("Invalid email or password.");
         return;
       }
-      router.push(searchParams.get("next") ?? "/");
+      router.push(searchParams.get("next") ?? "/dashboard");
       router.refresh();
     } catch {
       setError("Unable to sign in. Please try again.");
@@ -50,13 +50,11 @@ function LoginForm() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader className="space-y-1 text-center">
-        <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Ship className="h-5 w-5" />
+        <div className="mx-auto mb-2">
+          <LogoMark />
         </div>
-        <CardTitle className="text-lg">Sign in to PromoVault</CardTitle>
-        <CardDescription>
-          Trade promotion management for Celestial Cruises
-        </CardDescription>
+        <CardTitle className="text-lg">Sign in to Downbeat</CardTitle>
+        <CardDescription>Manage your bands and their shareable links</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -69,7 +67,7 @@ function LoginForm() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
+              placeholder="you@yourband.com"
             />
           </div>
           <div className="space-y-2">
@@ -91,8 +89,12 @@ function LoginForm() {
         <p className="mt-4 text-center text-sm text-muted-foreground">
           No account?{" "}
           <Link href="/signup" className="text-primary hover:underline">
-            Sign up
+            Sign up free
           </Link>
+        </p>
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          Just here to enter your availability? You don&apos;t need an account — use the link your
+          band leader sent you.
         </p>
       </CardContent>
     </Card>

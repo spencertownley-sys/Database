@@ -7,19 +7,18 @@ ALTER TABLE profiles
   ADD CONSTRAINT profiles_id_auth_users_fk
   FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE;
 
--- Create a profile row automatically on signup (default role: viewer)
+-- Create a profile row automatically on signup.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name, role)
+  INSERT INTO public.profiles (id, email, full_name)
   VALUES (
     NEW.id,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
-    'viewer'
+    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1))
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
@@ -31,80 +30,45 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- Helper: current user's role
-CREATE OR REPLACE FUNCTION public.current_user_role()
-RETURNS text
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
-AS $$
-  SELECT role FROM public.profiles WHERE id = auth.uid();
-$$;
-
--- Enable RLS everywhere
+-- Enable RLS everywhere. The app's own server code talks to Postgres over a
+-- direct (non-RLS-restricted) connection via Drizzle, so these policies are
+-- the backstop for any client that connects with the Supabase anon/auth key
+-- directly (e.g. the browser Supabase client used for auth only today).
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ships ENABLE ROW LEVEL SECURITY;
-ALTER TABLE regions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE voyages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promotions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promo_voyages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE disclaimers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promo_disclaimers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audience_segments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promo_audiences ENABLE ROW LEVEL SECURITY;
-ALTER TABLE promo_performance ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activity_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE band_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE availability_weekly ENABLE ROW LEVEL SECURITY;
+ALTER TABLE availability_exceptions ENABLE ROW LEVEL SECURITY;
 
--- Authenticated users can read everything
-CREATE POLICY "read all authenticated" ON profiles FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON ships FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON regions FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON voyages FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON promotions FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON promo_voyages FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON disclaimers FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON promo_disclaimers FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON audience_segments FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON promo_audiences FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON promo_performance FOR SELECT TO authenticated USING (true);
-CREATE POLICY "read all authenticated" ON activity_log FOR SELECT TO authenticated USING (true);
-
--- Users can update their own profile (but not their role)
+-- Users can read/update their own profile.
+CREATE POLICY "read own profile" ON profiles FOR SELECT TO authenticated
+  USING (id = auth.uid());
 CREATE POLICY "update own profile" ON profiles FOR UPDATE TO authenticated
-  USING (id = auth.uid())
-  WITH CHECK (id = auth.uid() AND role = (SELECT role FROM profiles WHERE id = auth.uid()));
+  USING (id = auth.uid());
 
--- Admins manage profiles
-CREATE POLICY "admins manage profiles" ON profiles FOR ALL TO authenticated
-  USING (public.current_user_role() = 'admin');
+-- A leader manages only the bands they created.
+CREATE POLICY "leader manages own bands" ON bands FOR ALL TO authenticated
+  USING (leader_id = auth.uid())
+  WITH CHECK (leader_id = auth.uid());
 
--- Writers: admin, manager, coordinator can create/update promo-related data
-CREATE POLICY "writers insert" ON promotions FOR INSERT TO authenticated
-  WITH CHECK (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "writers update" ON promotions FOR UPDATE TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "admins delete" ON promotions FOR DELETE TO authenticated
-  USING (public.current_user_role() = 'admin');
+-- A leader manages members/availability of their own bands. Band members
+-- themselves reach this data only through the app's server-side actions
+-- (which authenticate them by member_token, not by a Supabase session), so
+-- no anon-role policy is needed here.
+CREATE POLICY "leader manages own band members" ON band_members FOR ALL TO authenticated
+  USING (band_id IN (SELECT id FROM bands WHERE leader_id = auth.uid()))
+  WITH CHECK (band_id IN (SELECT id FROM bands WHERE leader_id = auth.uid()));
 
-CREATE POLICY "writers manage" ON promo_voyages FOR ALL TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "writers manage" ON promo_disclaimers FOR ALL TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "writers manage" ON promo_audiences FOR ALL TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "writers manage" ON disclaimers FOR ALL TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "writers manage" ON audience_segments FOR ALL TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "writers manage" ON ships FOR ALL TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "writers manage" ON voyages FOR ALL TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager', 'coordinator'));
-CREATE POLICY "writers manage" ON regions FOR ALL TO authenticated
-  USING (public.current_user_role() IN ('admin', 'manager'));
+CREATE POLICY "leader reads own weekly availability" ON availability_weekly FOR SELECT TO authenticated
+  USING (member_id IN (
+    SELECT bm.id FROM band_members bm
+    JOIN bands b ON b.id = bm.band_id
+    WHERE b.leader_id = auth.uid()
+  ));
 
--- Performance data: managed by admins/managers/analysts pipelines
-CREATE POLICY "analysts insert" ON promo_performance FOR INSERT TO authenticated
-  WITH CHECK (public.current_user_role() IN ('admin', 'manager', 'analyst'));
-
--- Activity log: any authenticated writer can append; nobody updates/deletes
-CREATE POLICY "writers append" ON activity_log FOR INSERT TO authenticated
-  WITH CHECK (public.current_user_role() IN ('admin', 'manager', 'coordinator', 'analyst'));
+CREATE POLICY "leader reads own exceptions" ON availability_exceptions FOR SELECT TO authenticated
+  USING (member_id IN (
+    SELECT bm.id FROM band_members bm
+    JOIN bands b ON b.id = bm.band_id
+    WHERE b.leader_id = auth.uid()
+  ));
