@@ -36,9 +36,9 @@ CREATE TRIGGER on_auth_user_created
 -- directly (e.g. the browser Supabase client used for auth only today).
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE band_day_labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE band_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE availability_weekly ENABLE ROW LEVEL SECURITY;
-ALTER TABLE availability_exceptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE availability ENABLE ROW LEVEL SECURITY;
 
 -- Users can read/update their own profile.
 CREATE POLICY "read own profile" ON profiles FOR SELECT TO authenticated
@@ -51,24 +51,28 @@ CREATE POLICY "leader manages own bands" ON bands FOR ALL TO authenticated
   USING (leader_id = auth.uid())
   WITH CHECK (leader_id = auth.uid());
 
--- A leader manages members/availability of their own bands. Band members
--- themselves reach this data only through the app's server-side actions
--- (which authenticate them by member_token, not by a Supabase session), so
--- no anon-role policy is needed here.
+CREATE POLICY "leader manages own day labels" ON band_day_labels FOR ALL TO authenticated
+  USING (band_id IN (SELECT id FROM bands WHERE leader_id = auth.uid()))
+  WITH CHECK (band_id IN (SELECT id FROM bands WHERE leader_id = auth.uid()));
+
+-- A leader manages members/availability of their own bands. A member who
+-- has linked their row to an account (profile_id = auth.uid()) can read
+-- their own membership + availability directly too.
 CREATE POLICY "leader manages own band members" ON band_members FOR ALL TO authenticated
   USING (band_id IN (SELECT id FROM bands WHERE leader_id = auth.uid()))
   WITH CHECK (band_id IN (SELECT id FROM bands WHERE leader_id = auth.uid()));
 
-CREATE POLICY "leader reads own weekly availability" ON availability_weekly FOR SELECT TO authenticated
+CREATE POLICY "member reads own membership" ON band_members FOR SELECT TO authenticated
+  USING (profile_id = auth.uid());
+
+CREATE POLICY "leader reads own availability" ON availability FOR SELECT TO authenticated
   USING (member_id IN (
     SELECT bm.id FROM band_members bm
     JOIN bands b ON b.id = bm.band_id
     WHERE b.leader_id = auth.uid()
   ));
 
-CREATE POLICY "leader reads own exceptions" ON availability_exceptions FOR SELECT TO authenticated
+CREATE POLICY "member reads own availability" ON availability FOR SELECT TO authenticated
   USING (member_id IN (
-    SELECT bm.id FROM band_members bm
-    JOIN bands b ON b.id = bm.band_id
-    WHERE b.leader_id = auth.uid()
+    SELECT bm.id FROM band_members bm WHERE bm.profile_id = auth.uid()
   ));

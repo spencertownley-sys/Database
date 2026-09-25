@@ -1,14 +1,16 @@
 import { db } from "@/db";
 import { bands, bandMembers } from "@/db/schema";
 import { and, eq, count } from "drizzle-orm";
-import { DAYS_OF_WEEK, TIME_BLOCKS, type AvailabilityStatus, type TimeBlock } from "@/lib/constants";
+import { getDateColumns, getTimeSlots } from "@/lib/band-settings";
+import type { AvailabilityStatus } from "@/lib/constants";
 import type {
   AggregateGrid,
   Band,
   BandWithAvailability,
+  DateColumn,
   MemberWithAvailability,
   SlotCounts,
-  WeeklyGrid,
+  AvailabilityRow,
 } from "@/types";
 
 export async function listBandsForLeader(
@@ -25,23 +27,72 @@ export async function listBandsForLeader(
   return rows.map((r) => ({ ...r.band, memberCount: r.memberCount }));
 }
 
-function emptySlotCounts(): SlotCounts {
-  return { available: 0, maybe: 0, unavailable: 0, total: 0 };
+/** Every band a linked member profile belongs to — for "Events you're in". */
+export async function listBandsForMemberProfile(
+  profileId: string
+): Promise<{ member: (typeof bandMembers.$inferSelect); band: Band }[]> {
+  const rows = await db
+    .select({ member: bandMembers, band: bands })
+    .from(bandMembers)
+    .innerJoin(bands, eq(bands.id, bandMembers.bandId))
+    .where(eq(bandMembers.profileId, profileId))
+    .orderBy(bands.createdAt);
+
+  return rows;
 }
 
-function buildAggregate(members: MemberWithAvailability[]): AggregateGrid {
+function emptySlotCounts(): SlotCounts {
+  return {
+    conflict: 0,
+    maybe: 0,
+    available: 0,
+    preferred: 0,
+    unfilled: 0,
+    conflictNames: [],
+    maybeNames: [],
+    availableNames: [],
+    preferredNames: [],
+    unfilledNames: [],
+  };
+}
+
+const NAME_KEY: Record<AvailabilityStatus | "unfilled", keyof SlotCounts> = {
+  conflict: "conflictNames",
+  maybe: "maybeNames",
+  available: "availableNames",
+  preferred: "preferredNames",
+  unfilled: "unfilledNames",
+};
+
+export function buildAggregate(
+  members: { name: string; grid: Record<string, Record<string, AvailabilityStatus>> }[],
+  dateColumns: DateColumn[],
+  timeSlots: string[]
+): AggregateGrid {
   const grid: AggregateGrid = {};
-  for (const day of DAYS_OF_WEEK) {
-    grid[day.value] = {};
-    for (const block of TIME_BLOCKS) {
+
+  for (const col of dateColumns) {
+    grid[col.date] = {};
+    for (const slot of timeSlots) {
       const counts = emptySlotCounts();
       for (const member of members) {
-        const status = member.weeklyGrid[day.value]?.[block.value] ?? "unavailable";
-        counts[status] += 1;
-        counts.total += 1;
+        const status = member.grid[col.date]?.[slot];
+        const bucket = status ?? "unfilled";
+        counts[bucket] += 1;
+        (counts[NAME_KEY[bucket]] as string[]).push(member.name);
       }
-      grid[day.value]![block.value] = counts;
+      grid[col.date][slot] = counts;
     }
+  }
+
+  return grid;
+}
+
+function buildMemberGrid(rows: AvailabilityRow[]): Record<string, Record<string, AvailabilityStatus>> {
+  const grid: Record<string, Record<string, AvailabilityStatus>> = {};
+  for (const row of rows) {
+    grid[row.date] ??= {};
+    grid[row.date][row.timeSlot] = row.status as AvailabilityStatus;
   }
   return grid;
 }
@@ -55,32 +106,39 @@ export async function getBandForLeader(
     where: and(eq(bands.id, bandId), eq(bands.leaderId, leaderId)),
     with: {
       members: {
-        with: { weeklyAvailability: true, exceptions: true },
+        with: { availability: true },
         orderBy: (m, { asc }) => [asc(m.createdAt)],
       },
+      dayLabels: true,
     },
   });
   if (!band) return null;
 
-  const members: MemberWithAvailability[] = band.members.map((m) => {
-    const weeklyGrid: WeeklyGrid = {};
-    for (const row of m.weeklyAvailability) {
-      weeklyGrid[row.dayOfWeek] ??= {};
-      weeklyGrid[row.dayOfWeek]![row.timeBlock as TimeBlock] =
-        row.status as AvailabilityStatus;
-    }
-    return {
-      ...m,
-      weeklyGrid,
-      exceptions: [...m.exceptions].sort((a, b) => a.date.localeCompare(b.date)),
-    };
-  });
+  const members: MemberWithAvailability[] = band.members.map((m) => ({
+    ...m,
+    grid: buildMemberGrid(m.availability),
+  }));
+
+  const dateColumns = getDateColumns(band, band.dayLabels);
+  const timeSlots = getTimeSlots(band);
 
   return {
     ...band,
     members,
-    aggregate: buildAggregate(members),
+    dayLabels: band.dayLabels,
+    aggregate: buildAggregate(members, dateColumns, timeSlots),
   };
+}
+
+/** Just the band's settings fields, scoped to the leader — for the edit form. */
+export async function getBandSettingsForLeader(
+  bandId: string,
+  leaderId: string
+): Promise<Band | null> {
+  const band = await db.query.bands.findFirst({
+    where: and(eq(bands.id, bandId), eq(bands.leaderId, leaderId)),
+  });
+  return band ?? null;
 }
 
 export async function getBandBySlug(slug: string) {

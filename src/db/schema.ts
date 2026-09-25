@@ -11,7 +11,7 @@ import {
 import { relations, sql } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
-// profiles — band leader accounts. The only people who ever log in.
+// profiles — band leader (and, optionally, member) accounts.
 // On Supabase, profiles.id references auth.users(id); that FK lives in
 // supabase/migrations (auth schema is not managed by Drizzle).
 // ---------------------------------------------------------------------------
@@ -23,8 +23,8 @@ export const profiles = pgTable("profiles", {
 });
 
 // ---------------------------------------------------------------------------
-// bands — one group a leader manages. `slug` is the public, shareable
-// identifier used in the join link (no auth needed to view/use it).
+// bands — one event/schedule a leader manages. `slug` is the public,
+// shareable identifier used in the join link (no auth needed to view/use it).
 // ---------------------------------------------------------------------------
 export const bands = pgTable(
   "bands",
@@ -35,6 +35,25 @@ export const bands = pgTable(
     leaderId: uuid("leader_id")
       .notNull()
       .references(() => profiles.id, { onDelete: "cascade" }),
+    description: text("description"),
+
+    // Schedule shape
+    scheduleType: text("schedule_type").notNull().default("date_time"), // 'date_time' | 'date_only'
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    activeDays: integer("active_days").array().notNull().default(sql`'{0,1,2,3,4,5,6}'::int[]`),
+
+    // Time-of-day grid (only meaningful when scheduleType === 'date_time')
+    timeSlotStart: text("time_slot_start").notNull().default("17:00"), // "HH:MM"
+    timeSlotEnd: text("time_slot_end").notNull().default("22:00"), // "HH:MM"
+    timeSlotMinutes: integer("time_slot_minutes").notNull().default(60),
+    eventDurationMinutes: integer("event_duration_minutes").notNull().default(120),
+
+    // Event details
+    location: text("location"),
+    locationType: text("location_type").notNull().default("tbd"), // 'in_person' | 'virtual' | 'tbd'
+    timezone: text("timezone").notNull().default("America/New_York"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
@@ -43,9 +62,31 @@ export const bands = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// band_members — a person in the band. No account, no password.
-// `member_token` is the bearer credential embedded in their personal link
+// band_day_labels — leader-authored labels tagging specific dates in a
+// band's range, e.g. "Load-in", "Soundcheck". One label per (band, date).
+// ---------------------------------------------------------------------------
+export const bandDayLabels = pgTable(
+  "band_day_labels",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    bandId: uuid("band_id")
+      .notNull()
+      .references(() => bands.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    label: text("label").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    bandIdx: index("idx_band_day_labels_band").on(table.bandId),
+    bandDateUnique: unique("band_day_labels_band_date_unique").on(table.bandId, table.date),
+  })
+);
+
+// ---------------------------------------------------------------------------
+// band_members — a person in the band. No account required. `member_token`
+// is the bearer credential embedded in their personal link
 // (/a/[slug]/[memberToken]) — knowing it is how they prove who they are.
+// `profile_id` is set only if/when they link this row to a real account.
 // ---------------------------------------------------------------------------
 export const bandMembers = pgTable(
   "band_members",
@@ -56,63 +97,42 @@ export const bandMembers = pgTable(
       .references(() => bands.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     instrument: text("instrument"),
+    contact: text("contact"),
     memberToken: uuid("member_token").notNull().default(sql`gen_random_uuid()`).unique(),
+    profileId: uuid("profile_id").references(() => profiles.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
     bandIdx: index("idx_band_members_band").on(table.bandId),
     tokenIdx: index("idx_band_members_token").on(table.memberToken),
+    profileIdx: index("idx_band_members_profile").on(table.profileId),
   })
 );
 
 // ---------------------------------------------------------------------------
-// availability_weekly — recurring "every week I'm usually..." grid.
-// One row per (member, day of week, time block). Missing row = unavailable.
+// availability — one row per (member, calendar date, time slot). Missing
+// row = unfilled (member hasn't responded yet). `time_slot` is "HH:MM", or
+// the ALL_DAY_SLOT sentinel for date-only bands.
 // ---------------------------------------------------------------------------
-export const availabilityWeekly = pgTable(
-  "availability_weekly",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    memberId: uuid("member_id")
-      .notNull()
-      .references(() => bandMembers.id, { onDelete: "cascade" }),
-    dayOfWeek: integer("day_of_week").notNull(), // 0 = Sunday .. 6 = Saturday
-    timeBlock: text("time_block").notNull(), // 'morning' | 'afternoon' | 'evening' | 'night'
-    status: text("status").notNull().default("unavailable"), // 'available' | 'maybe' | 'unavailable'
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => ({
-    memberIdx: index("idx_availability_weekly_member").on(table.memberId),
-    memberSlotUnique: unique("availability_weekly_member_slot_unique").on(
-      table.memberId,
-      table.dayOfWeek,
-      table.timeBlock
-    ),
-  })
-);
-
-// ---------------------------------------------------------------------------
-// availability_exceptions — one-off overrides for a specific calendar date
-// ("busy Dec 25 even though I'm normally free Wednesdays").
-// ---------------------------------------------------------------------------
-export const availabilityExceptions = pgTable(
-  "availability_exceptions",
+export const availability = pgTable(
+  "availability",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     memberId: uuid("member_id")
       .notNull()
       .references(() => bandMembers.id, { onDelete: "cascade" }),
     date: date("date").notNull(),
-    status: text("status").notNull(), // 'available' | 'maybe' | 'unavailable'
-    note: text("note"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    timeSlot: text("time_slot").notNull(),
+    status: text("status").notNull(), // 'conflict' | 'maybe' | 'available' | 'preferred'
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
-    memberIdx: index("idx_availability_exceptions_member").on(table.memberId),
-    memberDateUnique: unique("availability_exceptions_member_date_unique").on(
+    memberIdx: index("idx_availability_member").on(table.memberId),
+    memberSlotUnique: unique("availability_member_date_slot_unique").on(
       table.memberId,
-      table.date
+      table.date,
+      table.timeSlot
     ),
   })
 );
@@ -122,32 +142,28 @@ export const availabilityExceptions = pgTable(
 // ---------------------------------------------------------------------------
 export const profilesRelations = relations(profiles, ({ many }) => ({
   bands: many(bands),
+  memberships: many(bandMembers),
 }));
 
 export const bandsRelations = relations(bands, ({ one, many }) => ({
   leader: one(profiles, { fields: [bands.leaderId], references: [profiles.id] }),
   members: many(bandMembers),
+  dayLabels: many(bandDayLabels),
+}));
+
+export const bandDayLabelsRelations = relations(bandDayLabels, ({ one }) => ({
+  band: one(bands, { fields: [bandDayLabels.bandId], references: [bands.id] }),
 }));
 
 export const bandMembersRelations = relations(bandMembers, ({ one, many }) => ({
   band: one(bands, { fields: [bandMembers.bandId], references: [bands.id] }),
-  weeklyAvailability: many(availabilityWeekly),
-  exceptions: many(availabilityExceptions),
+  profile: one(profiles, { fields: [bandMembers.profileId], references: [profiles.id] }),
+  availability: many(availability),
 }));
 
-export const availabilityWeeklyRelations = relations(availabilityWeekly, ({ one }) => ({
+export const availabilityRelations = relations(availability, ({ one }) => ({
   member: one(bandMembers, {
-    fields: [availabilityWeekly.memberId],
+    fields: [availability.memberId],
     references: [bandMembers.id],
   }),
 }));
-
-export const availabilityExceptionsRelations = relations(
-  availabilityExceptions,
-  ({ one }) => ({
-    member: one(bandMembers, {
-      fields: [availabilityExceptions.memberId],
-      references: [bandMembers.id],
-    }),
-  })
-);

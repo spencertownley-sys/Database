@@ -1,8 +1,8 @@
 import { db } from "@/db";
 import { bandMembers, bands } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
-import type { AvailabilityStatus, TimeBlock } from "@/lib/constants";
-import type { MemberWithAvailability, WeeklyGrid } from "@/types";
+import type { AvailabilityStatus } from "@/lib/constants";
+import type { BandDayLabel, MemberWithAvailability } from "@/types";
 
 /**
  * Look up a band member by their bearer token, scoped to the band slug in
@@ -12,29 +12,42 @@ import type { MemberWithAvailability, WeeklyGrid } from "@/types";
 export async function getMemberByToken(
   slug: string,
   token: string
-): Promise<{ bandName: string; bandId: string; member: MemberWithAvailability } | null> {
-  const band = await db.query.bands.findFirst({ where: eq(bands.slug, slug) });
+): Promise<{
+  band: NonNullable<Awaited<ReturnType<typeof getBandForToken>>>;
+  dayLabels: BandDayLabel[];
+  member: MemberWithAvailability;
+} | null> {
+  const band = await getBandForToken(slug);
   if (!band) return null;
 
   const member = await db.query.bandMembers.findFirst({
     where: and(eq(bandMembers.memberToken, token), eq(bandMembers.bandId, band.id)),
-    with: { weeklyAvailability: true, exceptions: true },
+    with: { availability: true },
   });
   if (!member) return null;
 
-  const weeklyGrid: WeeklyGrid = {};
-  for (const row of member.weeklyAvailability) {
-    weeklyGrid[row.dayOfWeek] ??= {};
-    weeklyGrid[row.dayOfWeek]![row.timeBlock as TimeBlock] = row.status as AvailabilityStatus;
+  // Bump lastSeenAt on lookup.
+  await db
+    .update(bandMembers)
+    .set({ lastSeenAt: new Date() })
+    .where(eq(bandMembers.id, member.id));
+
+  const grid: Record<string, Record<string, AvailabilityStatus>> = {};
+  for (const row of member.availability) {
+    grid[row.date] ??= {};
+    grid[row.date][row.timeSlot] = row.status as AvailabilityStatus;
   }
 
   return {
-    bandName: band.name,
-    bandId: band.id,
-    member: {
-      ...member,
-      weeklyGrid,
-      exceptions: [...member.exceptions].sort((a, b) => a.date.localeCompare(b.date)),
-    },
+    band,
+    dayLabels: band.dayLabels,
+    member: { ...member, grid },
   };
+}
+
+async function getBandForToken(slug: string) {
+  return db.query.bands.findFirst({
+    where: eq(bands.slug, slug),
+    with: { dayLabels: true },
+  });
 }
