@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MORE.</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --ground: #0e0808;
+    --shadow: #1a0f0f;
+    --floor: #3d2b2b;
+    --grid: #6b4a3a;
+    --cream: #f2d3ab;
+    --orange: #e8a02a;
+    --steel: #7a7a8a;
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--ground);
+    color: var(--cream);
+    font: 12px/1.4 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--ground);
+    padding: env(safe-area-inset-top, 0px) 16px env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
+  }
+  #screen-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #screen {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #000;
+    box-shadow: 0 0 0 2px var(--shadow), 0 0 0 3px var(--floor), 0 18px 60px rgba(0, 0, 0, 0.6);
+    cursor: pointer;
+  }
+  #bar {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: 12px;
+    display: flex;
+    gap: 6px;
+    z-index: 2;
+  }
+  #bar button {
+    font: inherit;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--grid);
+    background: transparent;
+    border: 1px solid var(--floor);
+    padding: 4px 7px;
+    cursor: pointer;
+  }
+  #bar button:hover, #bar button:focus-visible { color: var(--cream); border-color: var(--grid); outline: none; }
+
+  /* on-screen SNES pad: shown on touch screens, or via the PAD button */
+  #pad {
+    display: none;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 4px 18px;
+    max-width: 520px;
+    width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
+  }
+  body.show-pad #pad { display: flex; }
+  @media (pointer: coarse) { #pad { display: flex; } body.hide-pad #pad { display: none; } }
+  .dpad { position: relative; width: 132px; height: 132px; flex: 0 0 auto; }
+  .dpad button { position: absolute; width: 44px; height: 44px; }
+  .dpad [data-btn=up] { left: 44px; top: 0; }
+  .dpad [data-btn=down] { left: 44px; bottom: 0; }
+  .dpad [data-btn=left] { left: 0; top: 44px; }
+  .dpad [data-btn=right] { right: 0; top: 44px; }
+  .dpad .hub { position: absolute; left: 44px; top: 44px; width: 44px; height: 44px; background: var(--steel); }
+  .dpad button, .mid button, .ab button {
+    border: 0;
+    padding: 0;
+    touch-action: none;
+    font: inherit;
+    cursor: pointer;
+  }
+  .dpad button { background: var(--steel); }
+  .dpad button::after {
+    content: "";
+    position: absolute;
+    inset: 14px;
+    background: #c0c0cc;
+  }
+  .dpad button.on, .dpad button:active { background: #c0c0cc; }
+  .mid { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .mid button {
+    width: 58px;
+    height: 16px;
+    border-radius: 8px;
+    background: var(--floor);
+    color: var(--cream);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+  .mid button.on { background: var(--grid); }
+  .ab { position: relative; width: 132px; height: 110px; flex: 0 0 auto; }
+  .ab button {
+    position: absolute;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--floor);
+    color: var(--cream);
+    box-shadow: inset 0 0 0 2px var(--grid);
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .ab button.on { background: var(--grid); }
+  .ab [data-btn=a] { right: 0; top: 0; }
+  .ab [data-btn=b] { left: 0; bottom: 0; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main id="stage">
+  <div id="screen-wrap">
+    <canvas id="screen" width="256" height="224" aria-label="MORE. game screen"></canvas>
+  </div>
+  <div id="pad" aria-hidden="true">
+    <div class="dpad">
+      <button data-btn="up" aria-label="Up"></button>
+      <button data-btn="left" aria-label="Left"></button>
+      <div class="hub"></div>
+      <button data-btn="right" aria-label="Right"></button>
+      <button data-btn="down" aria-label="Down"></button>
+    </div>
+    <div class="mid">
+      <button data-btn="sel">SELECT</button>
+      <button data-btn="start">START</button>
+    </div>
+    <div class="ab">
+      <button data-btn="b">B</button>
+      <button data-btn="a">A</button>
+    </div>
+  </div>
+</main>
+<div id="bar">
+  <button id="pad-toggle" type="button" title="Show or hide the on-screen pad">PAD</button>
+  <button id="fullscreen" type="button" title="Fullscreen (F)">FULL</button>
+</div>
+
+<!-- engine -->
+<script src="src/core/palette.js"></script>
+<script src="src/core/font.js"></script>
+<script src="src/core/gfx.js"></script>
+<script src="src/core/input.js"></script>
+<script src="src/core/audio.js"></script>
+<script src="src/core/save.js"></script>
+<script src="src/core/script.js"></script>
+<script src="src/core/dialog.js"></script>
+<!-- art -->
+<script src="src/art/sprites.js"></script>
+<script src="src/art/people.js"></script>
+<!-- data + story -->
+<script src="src/data/music.js"></script>
+<script src="src/data/voicemail-data.js"></script>
+<script src="src/story/cast.js"></script>
+<script src="src/story/voicemail.js"></script>
+<script src="src/story/prologue.js"></script>
+<script src="src/story/chapter1.js"></script>
+<!-- scenes -->
+<script src="src/scenes/intro.js"></script>
+<script src="src/scenes/prologue.js"></script>
+<script src="src/scenes/factory.js"></script>
+<script src="src/scenes/chapter-end.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>

@@ -152,3 +152,9 @@ supabase/migrations/      # RLS policies + auth trigger (Supabase-only)
   (`STATUS_TRANSITIONS`), approval/launch is manager+ only, and `approved →
   live` requires linked voyages, a disclaimer, and an audience.
 - Every mutation writes an `activity_log` row with `{field: {old, new}}` diffs.
+
+## Also in this repo: MORE.
+
+[`more/`](more/) is a separate, self-contained project: a 16-bit story game
+based on the paperclip maximizer thought experiment. It shares no code with
+PromoVault. Open `more/index.html` to play; see [`more/README.md`](more/README.md).
