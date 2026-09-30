@@ -30,8 +30,12 @@ export type AvailabilityRow = InferSelectModel<typeof availability>;
 // Composite / view types used across the app
 // ---------------------------------------------------------------------------
 
-/** grid[date][timeSlot] = status, for one member. */
-export type MemberGrid = Record<string, Record<string, AvailabilityStatus>>;
+/**
+ * grid[date][timeSlot] = status, for one member. A key mapped to `null`
+ * (as opposed to being absent) represents a cell explicitly marked to be
+ * cleared, distinct from one that was simply never answered.
+ */
+export type MemberGrid = Record<string, Record<string, AvailabilityStatus | null>>;
 
 export interface MemberWithAvailability extends BandMember {
   grid: MemberGrid;

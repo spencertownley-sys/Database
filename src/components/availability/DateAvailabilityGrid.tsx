@@ -30,7 +30,8 @@ export function DateAvailabilityGrid({
   const { toast } = useToast();
   const [savedGrid, setSavedGrid] = useState<MemberGrid>(initialGrid);
   const [localGrid, setLocalGrid] = useState<MemberGrid>(initialGrid);
-  const [activeStatus, setActiveStatus] = useState<AvailabilityStatus>("available");
+  /** "unset" is a UI-only tool — painting with it clears cells instead of setting a status. */
+  const [activeStatus, setActiveStatus] = useState<AvailabilityStatus | "unset">("available");
   const [saving, setSaving] = useState(false);
 
   const [dragStart, setDragStart] = useState<CellPos | null>(null);
@@ -54,19 +55,20 @@ export function DateAvailabilityGrid({
     return grid[date]?.[slot] ?? null;
   }
 
-  function setCells(cells: CellPos[], status: AvailabilityStatus) {
+  function setCells(cells: CellPos[], paint: AvailabilityStatus | "unset") {
+    const value: AvailabilityStatus | null = paint === "unset" ? null : paint;
     setLocalGrid((prev) => {
       const next: MemberGrid = { ...prev };
       for (const { r, c } of cells) {
         const date = dateColumns[c].date;
         const slot = timeSlots[r];
-        next[date] = { ...next[date], [slot]: status };
+        next[date] = { ...next[date], [slot]: value };
       }
       return next;
     });
   }
 
-  function commitRectFill(start: CellPos, end: CellPos, status: AvailabilityStatus) {
+  function commitRectFill(start: CellPos, end: CellPos, status: AvailabilityStatus | "unset") {
     const rMin = Math.min(start.r, end.r);
     const rMax = Math.max(start.r, end.r);
     const cMin = Math.min(start.c, end.c);
@@ -121,6 +123,8 @@ export function DateAvailabilityGrid({
     setCells([{ r, c }], activeStatus);
   }
 
+  const activeToolLabel = activeStatus === "unset" ? "Eraser" : STATUS_META[activeStatus].label;
+
   function isInDragRect(r: number, c: number): boolean {
     if (!dragStart || !dragEnd) return false;
     const rMin = Math.min(dragStart.r, dragEnd.r);
@@ -160,6 +164,15 @@ export function DateAvailabilityGrid({
     setCells(cells, activeStatus);
   }
 
+  /** Marks every cell — including previously saved ones — to be cleared on next save. */
+  function clearAllCells() {
+    const cells: CellPos[] = [];
+    for (let r = 0; r < timeSlots.length; r++) {
+      for (let c = 0; c < dateColumns.length; c++) cells.push({ r, c });
+    }
+    setCells(cells, "unset");
+  }
+
   function clearPendingChanges() {
     setLocalGrid(savedGrid);
   }
@@ -170,7 +183,7 @@ export function DateAvailabilityGrid({
       for (const slot of timeSlots) {
         const local = getStatus(localGrid, col.date, slot);
         const saved = getStatus(savedGrid, col.date, slot);
-        if (local && local !== saved) {
+        if (local !== saved) {
           updates.push({ date: col.date, timeSlot: slot, status: local });
         }
       }
@@ -210,6 +223,19 @@ export function DateAvailabilityGrid({
             {STATUS_META[status].label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setActiveStatus("unset")}
+          title="Erase — click or drag to clear cells back to not-yet-answered"
+          className={cn(
+            "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+            activeStatus === "unset"
+              ? cn(UNFILLED_META.cellClass, "border-foreground/40")
+              : "hover:bg-muted"
+          )}
+        >
+          Eraser
+        </button>
         <span className="ml-1 text-xs text-muted-foreground">is selected — click or drag cells</span>
       </div>
 
@@ -219,6 +245,9 @@ export function DateAvailabilityGrid({
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={fillRemaining}>
           Fill remaining
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={clearAllCells}>
+          Clear all
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={clearPendingChanges}>
           Clear unsaved changes
@@ -248,7 +277,7 @@ export function DateAvailabilityGrid({
               key={col.date}
               type="button"
               onClick={() => fillColumn(c)}
-              title={`Fill ${format(parseISO(col.date), "EEE, MMM d")} with ${STATUS_META[activeStatus].label}`}
+              title={`Fill ${format(parseISO(col.date), "EEE, MMM d")} with ${activeToolLabel}`}
               className="flex flex-col items-center justify-center border-b border-l bg-card px-1 py-1.5 text-center text-[11px] font-medium text-muted-foreground hover:bg-muted"
             >
               <span>{format(parseISO(col.date), "EEE")}</span>
@@ -266,7 +295,7 @@ export function DateAvailabilityGrid({
               <button
                 type="button"
                 onClick={() => fillRow(r)}
-                title={`Fill ${formatTimeSlot(slot)} with ${STATUS_META[activeStatus].label}`}
+                title={`Fill ${formatTimeSlot(slot)} with ${activeToolLabel}`}
                 className="sticky left-0 z-10 flex items-center justify-end border-b border-r bg-card px-2 py-2 text-right text-[11px] font-medium text-muted-foreground hover:bg-muted"
               >
                 {formatTimeSlot(slot)}

@@ -65,7 +65,7 @@ const NAME_KEY: Record<AvailabilityStatus | "unfilled", keyof SlotCounts> = {
 };
 
 export function buildAggregate(
-  members: { name: string; grid: Record<string, Record<string, AvailabilityStatus>> }[],
+  members: { name: string; grid: Record<string, Record<string, AvailabilityStatus | null>> }[],
   dateColumns: DateColumn[],
   timeSlots: string[]
 ): AggregateGrid {
