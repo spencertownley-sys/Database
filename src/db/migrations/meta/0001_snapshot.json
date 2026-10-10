@@ -1,100 +1,9 @@
 {
-  "id": "71754ae9-f9e7-4748-9ae1-f34d4b00436e",
+  "id": "20df8c89-c876-491a-a8d9-86fa1717c940",
   "prevId": "357dc877-2142-4df2-9e32-a91472489ca1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.availability": {
-      "name": "availability",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "member_id": {
-          "name": "member_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "date": {
-          "name": "date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "time_slot": {
-          "name": "time_slot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_availability_member": {
-          "name": "idx_availability_member",
-          "columns": [
-            {
-              "expression": "member_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "availability_member_id_band_members_id_fk": {
-          "name": "availability_member_id_band_members_id_fk",
-          "tableFrom": "availability",
-          "tableTo": "band_members",
-          "columnsFrom": [
-            "member_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "availability_member_date_slot_unique": {
-          "name": "availability_member_date_slot_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "member_id",
-            "date",
-            "time_slot"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.availability_exceptions": {
       "name": "availability_exceptions",
       "schema": "",
@@ -277,90 +186,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.band_day_labels": {
-      "name": "band_day_labels",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "band_id": {
-          "name": "band_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "date": {
-          "name": "date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_band_day_labels_band": {
-          "name": "idx_band_day_labels_band",
-          "columns": [
-            {
-              "expression": "band_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "band_day_labels_band_id_bands_id_fk": {
-          "name": "band_day_labels_band_id_bands_id_fk",
-          "tableFrom": "band_day_labels",
-          "tableTo": "bands",
-          "columnsFrom": [
-            "band_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "band_day_labels_band_date_unique": {
-          "name": "band_day_labels_band_date_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "band_id",
-            "date"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.band_members": {
       "name": "band_members",
       "schema": "",
@@ -402,12 +227,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "gen_random_uuid()"
-        },
-        "profile_id": {
-          "name": "profile_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -454,21 +273,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "idx_band_members_profile": {
-          "name": "idx_band_members_profile",
-          "columns": [
-            {
-              "expression": "profile_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -483,19 +287,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "band_members_profile_id_profiles_id_fk": {
-          "name": "band_members_profile_id_profiles_id_fk",
-          "tableFrom": "band_members",
-          "tableTo": "profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -541,86 +332,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "schedule_type": {
-          "name": "schedule_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'date_time'"
-        },
-        "start_date": {
-          "name": "start_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "end_date": {
-          "name": "end_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "active_days": {
-          "name": "active_days",
-          "type": "integer[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{0,1,2,3,4,5,6}'::int[]"
-        },
-        "time_slot_start": {
-          "name": "time_slot_start",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'17:00'"
-        },
-        "time_slot_end": {
-          "name": "time_slot_end",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'22:00'"
-        },
-        "time_slot_minutes": {
-          "name": "time_slot_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 60
-        },
-        "event_duration_minutes": {
-          "name": "event_duration_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 120
-        },
-        "location": {
-          "name": "location",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "location_type": {
-          "name": "location_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'tbd'"
-        },
-        "timezone": {
-          "name": "timezone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'America/New_York'"
         },
         "created_at": {
           "name": "created_at",

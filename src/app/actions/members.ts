@@ -8,10 +8,17 @@ import { toActionError } from "./helpers";
 import { ValidationError, type ActionResult } from "@/lib/action-errors";
 import { getCurrentProfile } from "@/lib/supabase/server";
 
+function cleanOptional(value: string | undefined, maxLen: number): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > maxLen) throw new ValidationError("That's a little long — try trimming it down.");
+  return trimmed;
+}
+
 /**
- * No login required: a member types their name once, and we find-or-create
- * their row in this band. The returned token is embedded in their personal
- * link (/a/[slug]/[token]) — that link IS their credential from then on.
+ * No login: a member types their name once, and we find-or-create their row
+ * in this band. The returned token is embedded in their personal link
+ * (/a/[slug]/[token]) — that link IS their credential from then on.
  */
 export async function joinBand(
   slug: string,
@@ -23,6 +30,8 @@ export async function joinBand(
     const trimmed = name.trim();
     if (!trimmed) throw new ValidationError("Enter your name to continue.");
     if (trimmed.length > 60) throw new ValidationError("That name's a little long.");
+    const cleanInstrument = cleanOptional(instrument, 60);
+    const cleanContact = cleanOptional(contact, 120);
 
     const band = await db.query.bands.findFirst({ where: eq(bands.slug, slug) });
     if (!band) throw new ValidationError("That link doesn't look right — check it and try again.");
@@ -40,12 +49,7 @@ export async function joinBand(
 
     const [member] = await db
       .insert(bandMembers)
-      .values({
-        bandId: band.id,
-        name: trimmed,
-        instrument: instrument?.trim() || null,
-        contact: contact?.trim() || null,
-      })
+      .values({ bandId: band.id, name: trimmed, instrument: cleanInstrument, contact: cleanContact })
       .returning();
 
     return { ok: true, data: { token: member.memberToken, memberName: member.name } };
@@ -54,28 +58,34 @@ export async function joinBand(
   }
 }
 
+/** Lets a member (no account) update their own name/role/contact from their personal link. */
 export async function updateMemberProfile(
   slug: string,
   token: string,
-  updates: { name?: string; instrument?: string; contact?: string }
+  fields: { name: string; instrument?: string; contact?: string }
 ): Promise<ActionResult> {
   try {
+    const trimmed = fields.name.trim();
+    if (!trimmed) throw new ValidationError("Enter your name.");
+    if (trimmed.length > 60) throw new ValidationError("That name's a little long.");
+    const cleanInstrument = cleanOptional(fields.instrument, 60);
+    const cleanContact = cleanOptional(fields.contact, 120);
+
     const band = await db.query.bands.findFirst({ where: eq(bands.slug, slug) });
     if (!band) throw new ValidationError("That link doesn't look right.");
+
     const member = await db.query.bandMembers.findFirst({
       where: and(eq(bandMembers.memberToken, token), eq(bandMembers.bandId, band.id)),
     });
     if (!member) throw new ValidationError("That link doesn't look right.");
 
-    const name = updates.name?.trim();
-    if (name !== undefined && !name) throw new ValidationError("Name can't be empty.");
-
     await db
       .update(bandMembers)
       .set({
-        ...(name ? { name } : {}),
-        ...(updates.instrument !== undefined ? { instrument: updates.instrument.trim() || null } : {}),
-        ...(updates.contact !== undefined ? { contact: updates.contact.trim() || null } : {}),
+        name: trimmed,
+        instrument: cleanInstrument,
+        contact: cleanContact,
+        lastSeenAt: new Date(),
       })
       .where(eq(bandMembers.id, member.id));
 
@@ -87,9 +97,8 @@ export async function updateMemberProfile(
 }
 
 /**
- * If there's a current Supabase session, link this anonymous member row to
- * the logged-in account. No-op / error if Supabase isn't configured or no
- * session exists — the caller should prompt login first in that case.
+ * Links this anonymous member row to the signed-in account, so it shows up
+ * on that account's dashboard. Requires Supabase and an active session.
  */
 export async function claimMemberRow(slug: string, token: string): Promise<ActionResult> {
   try {

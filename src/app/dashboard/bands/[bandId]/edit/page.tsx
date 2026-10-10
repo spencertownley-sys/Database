@@ -7,11 +7,12 @@ import type { ScheduleType, LocationType } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
-export default async function EditBandPage({ params }: { params: { bandId: string } }) {
+export default async function EditBandPage({ params }: { params: Promise<{ bandId: string }> }) {
+  const { bandId } = await params;
   const profile = await getCurrentProfile();
-  if (!profile) redirect(`/login?next=/dashboard/bands/${params.bandId}/edit`);
+  if (!profile) redirect(`/login?next=/dashboard/bands/${bandId}/edit`);
 
-  const band = await getBandSettingsForLeader(params.bandId, profile.id);
+  const band = await getBandSettingsForLeader(bandId, profile.id);
   if (!band) notFound();
 
   const initialValues: BandSettingsInput = {

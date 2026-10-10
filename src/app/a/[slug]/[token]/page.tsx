@@ -7,6 +7,7 @@ import { Logo } from "@/components/brand/Logo";
 import { AvailabilityEditor } from "@/components/availability/AvailabilityEditor";
 import { PersonalLinkCard } from "@/components/availability/PersonalLinkCard";
 import { AccountClaimCard } from "@/components/availability/AccountClaimCard";
+import { ProfileEditor } from "@/components/availability/ProfileEditor";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
@@ -14,12 +15,13 @@ export const dynamic = "force-dynamic";
 export default async function AvailabilityPage({
   params,
 }: {
-  params: { slug: string; token: string };
+  params: Promise<{ slug: string; token: string }>;
 }) {
-  const context = await getMemberByToken(params.slug, params.token);
+  const { slug, token } = await params;
+  const context = await getMemberByToken(slug, token);
 
   if (!context) {
-    const band = await getBandBySlug(params.slug);
+    const band = await getBandBySlug(slug);
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 text-center">
         <div className="mb-6">
@@ -33,7 +35,7 @@ export default async function AvailabilityPage({
         </p>
         {band && (
           <Button asChild className="mt-6">
-            <Link href={`/join/${params.slug}`}>Rejoin {band.name}</Link>
+            <Link href={`/join/${slug}`}>Rejoin {band.name}</Link>
           </Button>
         )}
       </div>
@@ -70,19 +72,30 @@ export default async function AvailabilityPage({
         </p>
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <PersonalLinkCard slug={params.slug} token={params.token} />
+          <PersonalLinkCard slug={slug} token={token} name={member.name} />
           <AccountClaimCard
-            slug={params.slug}
-            token={params.token}
+            slug={slug}
+            token={token}
             isLinked={!!member.profileId}
             isLoggedIn={!!profile}
             supabaseConfigured={supabaseConfigured}
           />
         </div>
 
+        <section className="mt-6 rounded-xl border bg-card p-4 sm:p-6">
+          <h2 className="mb-4 font-semibold">About you</h2>
+          <ProfileEditor
+            slug={slug}
+            token={token}
+            name={member.name}
+            instrument={member.instrument}
+            contact={member.contact}
+          />
+        </section>
+
         <AvailabilityEditor
-          slug={params.slug}
-          token={params.token}
+          slug={slug}
+          token={token}
           dateColumns={dateColumns}
           timeSlots={timeSlots}
           grid={member.grid}

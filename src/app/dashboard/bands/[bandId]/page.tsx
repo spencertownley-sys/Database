@@ -7,16 +7,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AggregateDateGrid } from "@/components/availability/AggregateDateGrid";
 import { StatusLegend } from "@/components/availability/StatusLegend";
-import { CopyLinkButton } from "@/components/dashboard/CopyLinkButton";
+import { CopyLinkButton } from "@/components/shared/CopyLinkButton";
 import { DayLabelsEditor } from "@/components/dashboard/DayLabelsEditor";
 import { Pencil } from "lucide-react";
 import { format } from "date-fns";
 
-export default async function BandDetailPage({ params }: { params: { bandId: string } }) {
+export default async function BandDetailPage({ params }: { params: Promise<{ bandId: string }> }) {
+  const { bandId } = await params;
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
 
-  const band = await getBandForLeader(params.bandId, profile.id);
+  const band = await getBandForLeader(bandId, profile.id);
   if (!band) notFound();
 
   const dateColumns = getDateColumns(band, band.dayLabels);
@@ -49,7 +50,7 @@ export default async function BandDetailPage({ params }: { params: { bandId: str
           <CardTitle className="text-base">Invite link</CardTitle>
         </CardHeader>
         <CardContent>
-          <CopyLinkButton slug={band.slug} />
+          <CopyLinkButton path={`/join/${band.slug}`} />
           <p className="mt-2 text-sm text-muted-foreground">
             Send this to your bandmates. They&apos;ll enter their name and mark their availability
             — no account needed.
