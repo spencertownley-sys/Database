@@ -17,13 +17,25 @@ CREATE TABLE "band_day_labels" (
 	CONSTRAINT "band_day_labels_band_date_unique" UNIQUE("band_id","date")
 );
 --> statement-breakpoint
-ALTER TABLE "band_members" ADD COLUMN "contact" text;--> statement-breakpoint
+ALTER TABLE "availability_exceptions" DROP CONSTRAINT "availability_exceptions_member_date_unique";--> statement-breakpoint
+ALTER TABLE "availability_weekly" DROP CONSTRAINT "availability_weekly_member_slot_unique";--> statement-breakpoint
+ALTER TABLE "availability_exceptions" DROP CONSTRAINT "availability_exceptions_member_id_band_members_id_fk";
+--> statement-breakpoint
+ALTER TABLE "availability_weekly" DROP CONSTRAINT "availability_weekly_member_id_band_members_id_fk";
+--> statement-breakpoint
+DROP INDEX "idx_availability_exceptions_member";--> statement-breakpoint
+DROP INDEX "idx_availability_weekly_member";--> statement-breakpoint
+ALTER TABLE "availability_exceptions" ALTER COLUMN "created_at" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "availability_weekly" ALTER COLUMN "status" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "availability_weekly" ALTER COLUMN "updated_at" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "bands" ALTER COLUMN "active_days" SET DEFAULT '{0,1,2,3,4,5,6}'::int[];--> statement-breakpoint
+ALTER TABLE "bands" ALTER COLUMN "use_time_blocks" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "bands" ALTER COLUMN "use_time_blocks" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "bands" ALTER COLUMN "active_time_blocks" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "bands" ALTER COLUMN "active_time_blocks" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "band_members" ADD COLUMN "profile_id" uuid;--> statement-breakpoint
 ALTER TABLE "bands" ADD COLUMN "description" text;--> statement-breakpoint
 ALTER TABLE "bands" ADD COLUMN "schedule_type" text DEFAULT 'date_time' NOT NULL;--> statement-breakpoint
-ALTER TABLE "bands" ADD COLUMN "start_date" date;--> statement-breakpoint
-ALTER TABLE "bands" ADD COLUMN "end_date" date;--> statement-breakpoint
-ALTER TABLE "bands" ADD COLUMN "active_days" integer[] DEFAULT '{0,1,2,3,4,5,6}'::int[] NOT NULL;--> statement-breakpoint
 ALTER TABLE "bands" ADD COLUMN "time_slot_start" text DEFAULT '17:00' NOT NULL;--> statement-breakpoint
 ALTER TABLE "bands" ADD COLUMN "time_slot_end" text DEFAULT '22:00' NOT NULL;--> statement-breakpoint
 ALTER TABLE "bands" ADD COLUMN "time_slot_minutes" integer DEFAULT 60 NOT NULL;--> statement-breakpoint

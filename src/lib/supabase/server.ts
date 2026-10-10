@@ -6,8 +6,8 @@ import { profiles } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import type { Profile } from "@/types";
 
-export function createClient() {
-  const cookieStore = cookies();
+export async function createClient() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,9 +34,9 @@ export function createClient() {
 
 /**
  * Current authenticated band leader's profile, or null.
- * In development without Supabase configured, falls back to the first
- * profile in the database so the app is usable against a plain Postgres
- * database.
+ * Without Supabase configured, falls back to the first profile in the
+ * database so the app (including a demo/preview deploy) is usable without
+ * setting up auth.
  */
 export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
   const supabaseConfigured =
@@ -46,7 +46,7 @@ export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
   let userId: string | null = null;
   if (supabaseConfigured) {
     try {
-      const supabase = createClient();
+      const supabase = await createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -57,7 +57,7 @@ export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
   }
 
   if (!userId) {
-    if (process.env.NODE_ENV !== "production" && !supabaseConfigured) {
+    if (!supabaseConfigured) {
       const [fallback] = await db.select().from(profiles).limit(1);
       return fallback ?? null;
     }

@@ -1,0 +1,1 @@
+ALTER TABLE "band_members" ADD COLUMN "contact" text;
