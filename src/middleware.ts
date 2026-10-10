@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/signup"];
+// Everything is public except the dashboard: the marketing site, login/signup,
+// and the /join and /a member flows all work without an account.
+const PROTECTED_PREFIXES = ["/dashboard"];
+const AUTH_PATHS = ["/login", "/signup"];
 
 export async function middleware(request: NextRequest) {
   // Without Supabase configured (plain-Postgres local dev), skip auth.
@@ -41,20 +44,24 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isPublic = PUBLIC_PATHS.some((p) =>
+  const isProtected = PROTECTED_PREFIXES.some((p) =>
+    request.nextUrl.pathname.startsWith(p)
+  );
+  const isAuthPath = AUTH_PATHS.some((p) =>
     request.nextUrl.pathname.startsWith(p)
   );
 
-  if (!user && !isPublic) {
+  if (!user && isProtected) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", request.nextUrl.pathname);
     return NextResponse.redirect(url);
   }
 
-  if (user && isPublic) {
+  if (user && isAuthPath) {
+    const next = request.nextUrl.searchParams.get("next");
     const url = request.nextUrl.clone();
-    url.pathname = "/";
+    url.pathname = next && next.startsWith("/") ? next : "/dashboard";
     url.search = "";
     return NextResponse.redirect(url);
   }

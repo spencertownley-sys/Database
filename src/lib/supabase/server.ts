@@ -33,9 +33,10 @@ export function createClient() {
 }
 
 /**
- * Current authenticated user's profile (role, name), or null.
- * In development without Supabase configured, falls back to the seeded admin
- * so the app is usable against a plain Postgres database.
+ * Current authenticated band leader's profile, or null.
+ * In development without Supabase configured, falls back to the first
+ * profile in the database so the app is usable against a plain Postgres
+ * database.
  */
 export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
   const supabaseConfigured =
@@ -57,11 +58,7 @@ export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
 
   if (!userId) {
     if (process.env.NODE_ENV !== "production" && !supabaseConfigured) {
-      const [fallback] = await db
-        .select()
-        .from(profiles)
-        .where(eq(profiles.email, "admin@promovault.test"))
-        .limit(1);
+      const [fallback] = await db.select().from(profiles).limit(1);
       return fallback ?? null;
     }
     return null;

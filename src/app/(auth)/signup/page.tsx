@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Ship } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LogoMark } from "@/components/brand/Logo";
 import {
   Card,
   CardContent,
@@ -16,8 +16,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,8 +32,7 @@ export default function SignupPage() {
     setLoading(true);
     try {
       const supabase = createClient();
-      // A DB trigger (see supabase/migrations) creates the profiles row with
-      // the default 'viewer' role on signup.
+      // A DB trigger (see supabase/migrations) creates the profiles row.
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -44,7 +44,7 @@ export default function SignupPage() {
       }
       setDone(true);
       setTimeout(() => {
-        router.push("/");
+        router.push(searchParams.get("next") ?? "/dashboard");
         router.refresh();
       }, 1500);
     } catch {
@@ -58,12 +58,12 @@ export default function SignupPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Ship className="h-5 w-5" />
+          <div className="mx-auto mb-2">
+            <LogoMark />
           </div>
-          <CardTitle className="text-lg">Create your account</CardTitle>
+          <CardTitle className="text-lg">Start your band on Downbeat</CardTitle>
           <CardDescription>
-            New accounts start with read-only access
+            Only you need an account — your bandmates just get a link
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -74,7 +74,7 @@ export default function SignupPage() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="fullName">Full name</Label>
+                <Label htmlFor="fullName">Your name</Label>
                 <Input
                   id="fullName"
                   required
@@ -92,7 +92,7 @@ export default function SignupPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
+                  placeholder="you@yourband.com"
                 />
               </div>
               <div className="space-y-2">
@@ -109,7 +109,7 @@ export default function SignupPage() {
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Creating account…" : "Sign up"}
+                {loading ? "Creating account…" : "Sign up free"}
               </Button>
             </form>
           )}
@@ -122,5 +122,13 @@ export default function SignupPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense>
+      <SignupForm />
+    </Suspense>
   );
 }

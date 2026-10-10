@@ -5,11 +5,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const metadata: Metadata = {
   title: {
-    default: "PromoVault",
-    template: "%s · PromoVault",
+    default: "Downbeat — Find time to play",
+    template: "%s · Downbeat",
   },
   description:
-    "Trade promotion management for cruise line marketing and revenue teams.",
+    "The easiest way for a band to find time to rehearse. Share one link, everyone taps their availability, no logins for the band.",
 };
 
 export default function RootLayout({

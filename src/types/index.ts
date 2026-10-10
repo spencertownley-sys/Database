@@ -1,149 +1,67 @@
 import type { InferSelectModel, InferInsertModel } from "drizzle-orm";
 import type {
-  ships,
-  regions,
-  voyages,
-  promotions,
-  promoVoyages,
-  disclaimers,
-  promoDisclaimers,
-  audienceSegments,
-  promoAudiences,
-  promoPerformance,
-  activityLog,
   profiles,
+  bands,
+  bandMembers,
+  bandDayLabels,
+  availability,
 } from "@/db/schema";
-import type {
-  OfferType,
-  PromoStatus,
-  UserRole,
-  Market,
-  BookingChannel,
-} from "@/lib/constants";
+import type { AvailabilityStatus } from "@/lib/constants";
+
+export type { DateColumn } from "@/lib/band-settings";
 
 // ---------------------------------------------------------------------------
 // DB row types (inferred from Drizzle schema)
 // ---------------------------------------------------------------------------
-export type Ship = InferSelectModel<typeof ships>;
-export type NewShip = InferInsertModel<typeof ships>;
-
-export type Region = InferSelectModel<typeof regions>;
-export type NewRegion = InferInsertModel<typeof regions>;
-
-export type Voyage = InferSelectModel<typeof voyages>;
-export type NewVoyage = InferInsertModel<typeof voyages>;
-
-export type Promotion = InferSelectModel<typeof promotions>;
-export type NewPromotion = InferInsertModel<typeof promotions>;
-
-export type PromoVoyage = InferSelectModel<typeof promoVoyages>;
-export type NewPromoVoyage = InferInsertModel<typeof promoVoyages>;
-
-export type Disclaimer = InferSelectModel<typeof disclaimers>;
-export type NewDisclaimer = InferInsertModel<typeof disclaimers>;
-
-export type PromoDisclaimer = InferSelectModel<typeof promoDisclaimers>;
-
-export type AudienceSegment = InferSelectModel<typeof audienceSegments>;
-export type NewAudienceSegment = InferInsertModel<typeof audienceSegments>;
-
-export type PromoAudience = InferSelectModel<typeof promoAudiences>;
-
-export type PromoPerformance = InferSelectModel<typeof promoPerformance>;
-export type NewPromoPerformance = InferInsertModel<typeof promoPerformance>;
-
-export type ActivityLogEntry = InferSelectModel<typeof activityLog>;
-export type NewActivityLogEntry = InferInsertModel<typeof activityLog>;
-
 export type Profile = InferSelectModel<typeof profiles>;
 export type NewProfile = InferInsertModel<typeof profiles>;
 
-// ---------------------------------------------------------------------------
-// JSONB shapes
-// ---------------------------------------------------------------------------
+export type Band = InferSelectModel<typeof bands>;
+export type NewBand = InferInsertModel<typeof bands>;
 
-/** promotions.offer_details */
-export interface OfferDetails {
-  discount_percent?: number;
-  discount_amount?: number;
-  obc_amount?: number;
-  deposit_amount?: number;
-  standard_deposit?: number;
-  upgrade_from?: string;
-  upgrade_to?: string;
-  included_perks?: string[];
-  combinable_with?: string[];
-  [key: string]: unknown;
-}
+export type BandMember = InferSelectModel<typeof bandMembers>;
+export type NewBandMember = InferInsertModel<typeof bandMembers>;
 
-/** promotions.content — channel-specific content variants */
-export interface PromoContent {
-  web?: { title?: string; body?: string; cta?: string };
-  email?: { subject?: string; body?: string };
-  ta_portal?: { description?: string };
-  [key: string]: unknown;
-}
+export type BandDayLabel = InferSelectModel<typeof bandDayLabels>;
 
-/** voyages.cabin_categories entries */
-export interface CabinCategory {
-  category: string;
-  description: string;
-  base_price: number;
-  inventory: number;
-}
-
-/** voyages.metadata — flexible PIM attributes */
-export interface VoyageMetadata {
-  theme?: string;
-  special_events?: string[];
-  onboard_features?: string[];
-  [key: string]: unknown;
-}
-
-/** audience_segments.criteria */
-export interface AudienceCriteria {
-  loyalty_tier?: string;
-  min_points?: number;
-  past_bookings?: { min?: number; max?: number };
-  residency?: string[];
-  age_min?: number;
-  has_minor_guests?: boolean;
-  [key: string]: unknown;
-}
-
-/** activity_log.changes — {field: {old, new}} */
-export type ActivityChanges = Record<string, { old: unknown; new: unknown }>;
+export type AvailabilityRow = InferSelectModel<typeof availability>;
 
 // ---------------------------------------------------------------------------
 // Composite / view types used across the app
 // ---------------------------------------------------------------------------
-export interface PromotionWithRelations extends Promotion {
-  owner?: Profile | null;
-  approver?: Profile | null;
-  voyageCount?: number;
-  disclaimerCount?: number;
-  audienceCount?: number;
+
+/**
+ * grid[date][timeSlot] = status, for one member. A key mapped to `null`
+ * (as opposed to being absent) represents a cell explicitly marked to be
+ * cleared, distinct from one that was simply never answered.
+ */
+export type MemberGrid = Record<string, Record<string, AvailabilityStatus | null>>;
+
+export interface MemberWithAvailability extends BandMember {
+  grid: MemberGrid;
 }
 
-export interface VoyageWithShip extends Voyage {
-  ship?: Ship | null;
-  region?: Region | null;
-  activePromoCount?: number;
+/** Per-cell counts + who's-in-which-bucket, across all members. */
+export interface SlotCounts {
+  conflict: number;
+  maybe: number;
+  available: number;
+  preferred: number;
+  unfilled: number;
+  conflictNames: string[];
+  maybeNames: string[];
+  availableNames: string[];
+  preferredNames: string[];
+  unfilledNames: string[];
 }
 
-export interface SearchResult {
-  id: string;
-  type: "promotion" | "voyage" | "ship" | "disclaimer";
-  title: string;
-  subtitle?: string;
-  url: string;
+/** aggregate[date][timeSlot] = counts across all members. */
+export type AggregateGrid = Record<string, Record<string, SlotCounts>>;
+
+export interface BandWithAvailability extends Band {
+  members: MemberWithAvailability[];
+  dayLabels: BandDayLabel[];
+  aggregate: AggregateGrid;
 }
 
-export interface SearchResults {
-  promotions: SearchResult[];
-  voyages: SearchResult[];
-  ships: SearchResult[];
-  disclaimers: SearchResult[];
-}
-
-export { type OfferType, type PromoStatus, type UserRole, type Market, type BookingChannel };
+export { type AvailabilityStatus };
