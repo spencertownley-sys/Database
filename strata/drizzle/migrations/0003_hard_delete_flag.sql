@@ -1,0 +1,1 @@
+ALTER TABLE "change_entries" ADD COLUMN "hard_delete" boolean DEFAULT false NOT NULL;
